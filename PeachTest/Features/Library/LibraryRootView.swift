@@ -27,6 +27,7 @@ struct LibraryRootView: View {
                 }
             }
             .navigationBarHidden(true)
+            .toolbar(.hidden, for: .navigationBar)
             .task {
                 model.attach(api)
                 await loadLibraries()
@@ -87,6 +88,10 @@ struct LibraryRootView: View {
                             Task { await model.select(libraryID: library.id) }
                         }
                     }
+                } else if let library = libraries.first {
+                    Text(library.name)
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.42))
                 }
                 if let performer = model.filter.performer {
                     activeChip("演员 · \(performer)") {

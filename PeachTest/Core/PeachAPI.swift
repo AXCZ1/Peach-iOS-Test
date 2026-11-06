@@ -5,7 +5,7 @@ struct PeachAPIError: LocalizedError {
     var errorDescription: String? { message }
 }
 
-final class PeachAPI {
+final class PeachAPI: @unchecked Sendable {
     nonisolated static let defaultAddress = "http://192.168.5.5:8900/"
 
     nonisolated let baseURL: URL
@@ -180,6 +180,8 @@ final class PeachAPI {
         ]))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        request.httpBody = Data()
         session.dataTask(with: request).resume()
     }
 

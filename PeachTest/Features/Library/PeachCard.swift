@@ -66,6 +66,7 @@ struct PeachCard: View {
         }
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("library.card.\(item.id)")
         .accessibilityLabel("\(item.displayNumber)，\(item.title)")
     }
 }

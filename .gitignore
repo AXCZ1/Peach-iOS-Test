@@ -1,7 +1,6 @@
 DerivedData/
 build/
-artifacts/*.ipa
-artifacts/*.sha256
+artifacts/
 work/
 .DS_Store
 xcuserdata/
