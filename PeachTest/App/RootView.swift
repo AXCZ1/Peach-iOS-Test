@@ -13,8 +13,6 @@ struct RootView: View {
                     LibraryRootView(api: api, session: session)
                         .id(ObjectIdentifier(api))
                 }
-            case .failed:
-                LoginView()
             }
         }
         .task { await session.restore() }

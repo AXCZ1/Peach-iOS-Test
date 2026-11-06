@@ -2,6 +2,7 @@ DerivedData/
 build/
 artifacts/
 work/
+.build/
 .DS_Store
 xcuserdata/
 *.xcuserstate

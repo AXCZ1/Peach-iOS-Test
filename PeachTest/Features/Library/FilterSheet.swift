@@ -50,6 +50,30 @@ struct FilterSheet: View {
                         }
                     }
                 }
+                Section("状态与排序") {
+                    Picker("状态", selection: Binding(
+                        get: { model.filter.state },
+                        set: { model.filter.state = $0 }
+                    )) {
+                        ForEach(CatalogState.allCases) { state in
+                            Text(state.label).tag(state)
+                        }
+                    }
+                    Picker("排序", selection: Binding(
+                        get: { model.filter.sort },
+                        set: { model.filter.sort = $0 }
+                    )) {
+                        ForEach(CatalogSort.allCases) { sort in
+                            Text(sort.label).tag(sort)
+                        }
+                    }
+                    if model.filter.sort.supportsDirection {
+                        Toggle("升序", isOn: Binding(
+                            get: { model.filter.ascending },
+                            set: { model.filter.ascending = $0 }
+                        ))
+                    }
+                }
                 Section {
                     Button("清除全部筛选") {
                         query = ""

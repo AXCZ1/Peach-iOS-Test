@@ -1,16 +1,23 @@
 # Peach iOS Test
 
-Standalone SwiftUI test app for the Peach media server at `http://192.168.5.5:8900/`.
+Standalone SwiftUI app for the Peach media server at http://192.168.5.5:8900/.
 
-- Bundle ID: `com.axcz1.peachios.test`
-- Display name: `Peach Test`
+- Bundle ID: com.axcz1.peachios.test
+- Display name: Peach Test
 - Minimum iOS: 17.0
-- Read-only catalog, search, filters, item details, native AVPlayer/HLS playback
-- No write endpoints, management, scraping, downloads, or file operations
+- Catalog, search, filters, entity index/profiles, item details
+- Native AVPlayer/HLS playback with resume position and watch telemetry
+- Immersive random queue, video wall, large/dense density toggle
+- Personal records: rating, climax count with undo, watch later, like, seen/dislike
+- Read-only management view (tasks, configuration, scan/follow/download status)
+- No delete, scrape, download-submit, authentication or deployment writes
 
-The app is intentionally separate from `NAS-ios`; it has its own Codemagic
-application and produces `Peach-iOS-Test-unsigned.ipa`.
+Feature-by-feature parity with Peach 0.52.0, including what is intentionally
+absent, is in [FEATURE-MATRIX.md](FEATURE-MATRIX.md).
 
-Device acceptance steps and the current delivered build are in
-[ACCEPTANCE.md](ACCEPTANCE.md). This first test version is not connected to the
-NAS iOS app and does not modify NAS build 82.
+The app is intentionally separate from NAS-ios; it has its own Codemagic
+application and produces Peach-iOS-Test-unsigned.ipa.
+
+Device acceptance steps are in [ACCEPTANCE.md](ACCEPTANCE.md). The app is not
+connected to NAS iOS and does not modify NAS build 82.
+

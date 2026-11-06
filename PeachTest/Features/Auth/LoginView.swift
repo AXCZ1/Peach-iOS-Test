@@ -119,7 +119,8 @@ struct LoginView: View {
         working = true
         focus = nil
         Task {
-            await session.signIn(password: password)
+            let entered = password
+            await session.signIn(password: entered)
             working = false
             if session.phase == .signedIn { password = "" }
         }

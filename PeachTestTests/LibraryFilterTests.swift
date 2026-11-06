@@ -40,4 +40,9 @@ final class LibraryFilterTests: XCTestCase {
         XCTAssertTrue(url.absoluteString.contains("A%2BB%20"), url.absoluteString)
         XCTAssertFalse(url.absoluteString.contains("A+B"), url.absoluteString)
     }
+
+    func testLoginDeadlineIsBounded() {
+        XCTAssertEqual(LoginPolicy.deadline, .seconds(25))
+        XCTAssertFalse(LoginPolicy.waitsForConnectivity)
+    }
 }

@@ -31,4 +31,23 @@ final class ItemDetailModel: ObservableObject {
             state = .failed(error.localizedDescription)
         }
     }
+
+    /// Re-reads after a write so the next action toggles from the server's
+    /// persisted value rather than an optimistic guess.
+    func refresh() async {
+        do {
+            state = .loaded(try await api.item(id: id))
+        } catch {
+            // Keep the last confirmed item; the caller already reports the write failure.
+        }
+    }
+
+    @discardableResult
+    func rate(star: Int) async throws -> Int {
+        guard let current = item else { return 0 }
+        let value = star == current.ratingStars ? 0 : star * 20
+        _ = try await api.feedback(id: id, kind: "rate", value: value)
+        await refresh()
+        return value
+    }
 }

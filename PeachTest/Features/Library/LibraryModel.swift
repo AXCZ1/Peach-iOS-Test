@@ -75,12 +75,46 @@ final class LibraryModel: ObservableObject {
     }
 
     func clearFilter() async {
-        filter = LibraryFilter(libraryID: selectedLibraryID)
+        let library = selectedLibraryID
+        filter = LibraryFilter(libraryID: library)
         await reload()
     }
 
-    func apiIndex(kind: String) async throws -> [PeachFacet] {
+    func setState(_ state: CatalogState) async {
+        filter.state = state
+        await reload()
+    }
+
+    func setSort(_ sort: CatalogSort) async {
+        if filter.sort == sort {
+            if sort.supportsDirection { filter.ascending.toggle() }
+        } else {
+            filter.sort = sort
+            filter.ascending = false
+        }
+        if sort == .seed { filter.seed = Int.random(in: 1...99990) }
+        await reload()
+    }
+
+    func shuffle() async {
+        filter.sort = .seed
+        filter.seed = Int.random(in: 1...99990)
+        await reload()
+    }
+
+    func apply(_ patch: (inout LibraryFilter) -> Void) async {
+        patch(&filter)
+        filter.libraryID = selectedLibraryID
+        await reload()
+    }
+
+    func replace(item: PeachItem) {
+        guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
+        items[index] = item
+    }
+
+    func apiIndex(kind: String, query: String = "") async throws -> [PeachFacet] {
         guard let api else { return [] }
-        return try await api.index(kind)
+        return try await api.index(kind: kind, query: query)
     }
 }
