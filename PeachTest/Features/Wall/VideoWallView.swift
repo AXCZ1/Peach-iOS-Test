@@ -209,8 +209,8 @@ struct VideoWallView: View {
                 return
             }
             state = .ready
-        } catch {
-            state = .failed(error.localizedDescription)
+        } catch let failure {
+            state = .failed(failure.localizedDescription)
         }
     }
 
@@ -223,8 +223,8 @@ struct VideoWallView: View {
             toast = on ? "已加入稍后看" : "已移出稍后看"
             try? await Task.sleep(for: .seconds(1.4))
             toast = nil
-        } catch {
-            toast = error.localizedDescription
+        } catch let failure {
+            toast = failure.localizedDescription
         }
     }
 }
@@ -303,7 +303,7 @@ private struct WallTile: View {
             if item.progress > 0 {
                 VStack { Spacer(); Rectangle().fill(PeachTheme.coral).frame(height: 2) }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .scaleEffect(x: item.progress, anchor: .leading)
+                    .scaleEffect(x: CGFloat(item.progress), anchor: .leading)
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: isSelected ? 10 : 3, style: .continuous))

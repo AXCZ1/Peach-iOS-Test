@@ -59,7 +59,7 @@ final class GestureView: UIView, UIGestureRecognizerDelegate {
         self.double = double
     }
 
-    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return true }
         let velocity = pan.velocity(in: self)
         return abs(velocity.x) > abs(velocity.y) * 1.4

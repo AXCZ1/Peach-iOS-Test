@@ -81,8 +81,8 @@ struct EntityBrowseView: View {
         error = nil
         do {
             items = try await api.index(kind: kind.apiKind, query: query)
-        } catch {
-            error = error.localizedDescription
+        } catch let failure {
+            error = failure.localizedDescription
         }
         loading = false
     }
@@ -242,8 +242,8 @@ struct EntityDetailView: View {
         do {
             let shortcuts = try await api.setFavorite(entityID: entity.id, on: !favorite)
             favorite = shortcuts.favorites.contains { $0.entityID == entity.id }
-        } catch {
-            self.error = error.localizedDescription
+        } catch let failure {
+            self.error = failure.localizedDescription
         }
     }
 
@@ -265,8 +265,8 @@ struct EntityDetailView: View {
             items = try await api.items(filter, offset: 0, limit: 60).items
             let shortcuts = try? await api.libraryShortcuts()
             favorite = shortcuts?.favorites.contains { $0.entityID == loaded.id } ?? false
-        } catch {
-            error = error.localizedDescription
+        } catch let failure {
+            error = failure.localizedDescription
         }
         loading = false
     }

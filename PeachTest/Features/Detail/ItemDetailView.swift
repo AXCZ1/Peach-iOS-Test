@@ -322,8 +322,8 @@ struct ItemDetailView: View {
                     await model.refresh()
                 }
             })
-        } catch {
-            showToast(error.localizedDescription, undo: nil)
+        } catch let failure {
+            showToast(failure.localizedDescription, undo: nil)
         }
     }
 
@@ -335,8 +335,8 @@ struct ItemDetailView: View {
             try await api.setLiked(id: current.id, liked: target)
             await model.refresh()
             showToast(target ? "已标记喜欢" : "已取消喜欢", undo: nil)
-        } catch {
-            showToast(error.localizedDescription, undo: nil)
+        } catch let failure {
+            showToast(failure.localizedDescription, undo: nil)
         }
     }
 
@@ -348,8 +348,8 @@ struct ItemDetailView: View {
             await model.refresh()
             let label = kind == "seen" ? "看过" : "不合口味"
             showToast(result.feedback == kind ? "已标记\(label)" : "已取消\(label)", undo: nil)
-        } catch {
-            showToast(error.localizedDescription, undo: nil)
+        } catch let failure {
+            showToast(failure.localizedDescription, undo: nil)
         }
     }
 
@@ -365,8 +365,8 @@ struct ItemDetailView: View {
                     await model.refresh()
                 }
             })
-        } catch {
-            showToast(error.localizedDescription, undo: nil)
+        } catch let failure {
+            showToast(failure.localizedDescription, undo: nil)
         }
     }
 

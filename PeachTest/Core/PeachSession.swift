@@ -32,6 +32,7 @@ final class PeachSession: ObservableObject {
         phase = .signedOut
         let attempt = UUID()
         activeAttempt = attempt
+        let loginDeadline = self.loginDeadline
         do {
             try await withThrowingTaskGroup(of: Void.self) { group in
                 group.addTask {

@@ -93,7 +93,7 @@ struct StatsView: View {
         .toolbarColorScheme(.dark, for: .navigationBar)
         .task {
             do { stats = try await api.stats() }
-            catch { self.error = error.localizedDescription }
+            catch let failure { self.error = failure.localizedDescription }
         }
         .sheet(item: $opened) { item in
             NavigationStack {
@@ -171,7 +171,7 @@ struct TaskCenterView: View {
 
     private func load() async {
         do { tasks = try await api.tasks() }
-        catch { self.error = error.localizedDescription }
+        catch let failure { self.error = failure.localizedDescription }
     }
 }
 
@@ -302,14 +302,14 @@ struct PlaylistsView: View {
                 items.first(where: { $0.id == id })
             } ?? items[0]
             queue = PlaylistQueue(first: first, items: items)
-        } catch {
-            self.error = error.localizedDescription
+        } catch let failure {
+            self.error = failure.localizedDescription
         }
     }
 
     private func load() async {
         do { playlists = try await api.playlists() }
-        catch { self.error = error.localizedDescription }
+        catch let failure { self.error = failure.localizedDescription }
     }
 
     private func create() async {
@@ -317,8 +317,8 @@ struct PlaylistsView: View {
             _ = try await api.addPlaylist(name: name.trimmingCharacters(in: .whitespaces), ids: [])
             name = ""
             await load()
-        } catch {
-            self.error = error.localizedDescription
+        } catch let failure {
+            self.error = failure.localizedDescription
         }
     }
 }

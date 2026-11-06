@@ -94,7 +94,7 @@ struct PeachCard: View {
                         .fill(PeachTheme.coral)
                         .frame(height: 2)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .scaleEffect(x: item.progress, anchor: .leading)
+                        .scaleEffect(x: CGFloat(item.progress), anchor: .leading)
                         .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
                 }
                 if item.watchLater || item.isFlagged {
