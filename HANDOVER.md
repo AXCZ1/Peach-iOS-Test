@@ -10,7 +10,7 @@
 - 工程为 PeachTest.xcodeproj，scheme PeachTest；Bundle ID com.axcz1.peachios.test，显示名 Peach Test，最低 iOS 17.0，仅 iPhone ARM64。
 - IPA 入口是 codemagic.yaml 中唯一的 ios-unsigned-ipa，只手动触发。Codemagic 应用 ID 6aed85f0165a22c4d4b043a0。构建脚本 scripts/build-unsigned-ipa.sh；不跑 Simulator，不启用 GitHub Actions。
 - 构建 8 源码提交：b993ab02fcde3fd79055e171c649178d5b6b9e1f；构建 ID：6aedb851ec37262835fae34c。
-- 交付文件：C:\Users\mo\Downloads\NAS-unsigned .8.ipa，1,165,459 字节，SHA256 E99A1F09EB445B4AAC76225F478DC65E7A8037F489809649431255BB3399E7AD。
+- 交付文件：C:\Users\mo\Downloads\Peach-iOS-Test-unsigned.8.ipa，1,165,459 字节，SHA256 E99A1F09EB445B4AAC76225F478DC65E7A8037F489809649431255BB3399E7AD。
 - 构建 7 的 NAS-unsigned .7.ipa 保留在 Downloads 作为上一版校验包（SHA256 D80FC449E6D8E4931CC3E13373CFD5DDCE251CDB26E432E5DD788EC65F730BEB）。
 - 验证证据：artifacts/codemagic-8/，包括 IPA、构建日志；构建日志里 Debug/Release 各 13 项测试通过，BUILD SUCCEEDED。
 
@@ -57,4 +57,5 @@
 1. 用户安装构建 8，按 ACCEPTANCE.md 验收第 1 组（沉浸、播放墙、大小图、记一次高潮），反馈实际结果。
 2. 保持 NAS 构建 82 和原 NAS 工程不变；不要自行重新构建或接入。
 3. 只有用户明确同意接入 NAS iOS 后，才在独立测试版基础上评估集成范围。
+
 

@@ -1,6 +1,6 @@
 # Peach iOS Test — 真机验收
 
-构建 **8**：C:\Users\mo\Downloads\NAS-unsigned .8.ipa
+构建 **8**：C:\Users\mo\Downloads\Peach-iOS-Test-unsigned.8.ipa
 
 SHA256：E99A1F09EB445B4AAC76225F478DC65E7A8037F489809649431255BB3399E7AD
 
@@ -49,4 +49,5 @@ Bundle ID com.axcz1.peachios.test，显示名 Peach Test，与 NAS 构建 82（c
 - 构建源码提交：b993ab02fcde3fd79055e171c649178d5b6b9e1f
 - 构建 ID：6aedb851ec37262835fae34c
 - 上一版构建 7：C:\Users\mo\Downloads\NAS-unsigned .7.ipa，SHA256 D80FC449E6D8E4931CC3E13373CFD5DDCE251CDB26E432E5DD788EC65F730BEB
+
 
