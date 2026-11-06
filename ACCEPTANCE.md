@@ -17,6 +17,7 @@ Bundle ID：`com.axcz1.peachios.test`。显示名称 `Peach Test`，与 NAS 构�
 - MP4：`/api/stream-plan` 返回 `range`，`/stream` 实测 `206 video/mp4` 且带 Range。
 - MKV：`/api/stream-plan` 返回 `hls`，播放列表和首个 `video/mp2t` 分片实测成功。
 - 表单登录 `/login`（`token`、`next`、`days`）实测能取得 `peach_session`，随后 API 返回 200。
+- 本轮没有使用已安装的真机 App 发起播放；AVPlayer 对 MP4 和 HLS 的设备端兼容性仍待验收。
 
 ## 需要你在 iPhone 上验收
 
