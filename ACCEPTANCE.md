@@ -41,4 +41,4 @@ Bundle ID：`com.axcz1.peachios.test`。显示名称 `Peach Test`，与 NAS 构�
 - 构建源码提交：`87a0a3b044555fb63b92a6545f7cd03a7ad87a88`
 - 构建 ID：`6aed8829c8686d389dfac2c2`
 - 构建入口：`codemagic.yaml`、`scripts/build-unsigned-ipa.sh`
-- 交付说明更新提交：`e1ca562bfe6d75a700f4688f86786d6b578f732c`（仅文档，不改变 IPA）
+- 交付说明提交：仓库 `main`（仅文档，不改变 IPA）
