@@ -33,9 +33,9 @@ final class PeachSession: ObservableObject {
             address = base.absoluteString
             api = client
             phase = .signedIn
-        } catch {
-            phase = .failed(error.localizedDescription)
-            error = error.localizedDescription
+        } catch let failure {
+            phase = .failed(failure.localizedDescription)
+            error = failure.localizedDescription
         }
     }
 
