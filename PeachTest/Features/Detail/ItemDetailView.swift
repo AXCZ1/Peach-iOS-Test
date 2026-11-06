@@ -212,8 +212,8 @@ struct ItemDetailView: View {
                         do {
                             let value = try await model.rate(star: star)
                             if value == 0 { showToast("已取消评分", undo: nil) }
-                        } catch {
-                            showToast(error.localizedDescription, undo: nil)
+                        } catch let failure {
+                            showToast(failure.localizedDescription, undo: nil)
                         }
                     }
                 } label: {

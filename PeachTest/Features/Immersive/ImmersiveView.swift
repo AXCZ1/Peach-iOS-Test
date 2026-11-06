@@ -200,8 +200,8 @@ struct ImmersiveView: View {
             items = pool
             currentID = startID ?? items.first?.id
             state = .ready
-        } catch {
-            state = .failed(error.localizedDescription)
+        } catch let failure {
+            state = .failed(failure.localizedDescription)
         }
     }
 
