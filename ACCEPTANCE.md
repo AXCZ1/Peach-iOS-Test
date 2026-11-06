@@ -1,6 +1,11 @@
 # Peach iOS Test — 修复版验收
 
-更新：2026-11-07。代码验证已完成，新的 Codemagic 构建与 IPA 校验进行中；构建 8 保留作回退。
+更新：2026-11-07。构建 **9** 已完成编译、打包、下载及本地校验；构建 8 保留作回退。构建 9 的真机验收尚未进行。
+
+- 安装包：[Peach-iOS-Test-unsigned.9.ipa](C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.9.ipa)，1,284,041 字节。
+- SHA256：`e7d6c34268f802d3f5b53ab037ba0d744fd33ef068731d5b417fd2599f0dd687`。
+- 源码提交：`80075b14988034803363dff9f03cde8047f6e2d4`；Codemagic 构建 ID：`6aee0c4c52103eb5dbe40626`。
+- 证据目录：`artifacts/codemagic-9/`，含完整编译步骤日志、云端 IPA 校验及本地下载校验。
 
 Bundle ID `com.axcz1.peachios.test`，显示名 `Peach Test`，最低 iOS 17.0。与 NAS 构建 82 分开安装，尚未接入 NAS iOS。
 
@@ -15,8 +20,9 @@ Bundle ID `com.axcz1.peachios.test`，显示名 `Peach Test`，最低 iOS 17.0�
 ## 已有证据
 
 - 本地 WSL Swift 6.1.3：27 项测试通过，包括真实隔离 Peach 的索引/图片/封面字段读取，以及计数 5→6→5；连续消费同一撤销操作只发送一次。测试后隔离影片计数恢复原值。
-- UI Swift 文件语法解析通过；不等于 iPhone 编译或真机效果通过。
-- 新增 Mac 主机测试调用实际 PlaybackController，检查打开详情及退出后迟到计划不能创建播放器；结果等待本轮 Codemagic。
+- Codemagic Mac 主机 Debug/Release 各 29 项：27 项通过、2 项真实局域网接口测试因云端未提供凭据而跳过，0 失败；这 2 项已在本地真实隔离实例通过。
+- 新增 Mac 主机测试调用实际 PlaybackController，检查打开详情及退出后迟到计划不能创建播放器，两项均通过。
+- 无签名 iPhone ARM64 Release 编译通过；云端校验 IPA 结构、Bundle ID、版本、iOS 17.0、arm64 及无签名；本地重新验证 ZIP、Info.plist、Mach-O 和 SHA256 后复制到 Downloads。
 - 两部示例片的 /thumb 为已有 1440×810 九宫格，/api/timeline 为空；按浏览器九段映射选图。密集时间轴分片/外部 cues/缺省数据路径有核心测试。
 - NAS 构建 82 基线 SHA256：FA01E9F509B5C269EDFF888FB872AE44624F050EB0BB16D799E8453D9C9E12E4，19,135,903 字节。
 
