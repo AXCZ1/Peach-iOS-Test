@@ -98,8 +98,9 @@ final class PlayerModel: ObservableObject {
     }
 
     func stop() {
-        player?.pause()
         removeObservers()
+        player?.pause()
+        player?.replaceCurrentItem(with: nil)
         api.cancelStream(sessionID: sessionID)
         player = nil
     }
@@ -138,11 +139,9 @@ final class PlayerModel: ObservableObject {
             Task { @MainActor in self?.buffered = seconds }
         }
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak self] time in
-            Task { @MainActor in
-                guard let self else { return }
-                let seconds = time.seconds
-                if seconds.isFinite { self.currentTime = seconds }
-            }
+            let seconds = time.seconds
+            guard seconds.isFinite else { return }
+            Task { @MainActor in self?.currentTime = seconds }
         }
         stallTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(45))
