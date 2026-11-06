@@ -5,14 +5,6 @@ struct PeachAPIError: LocalizedError {
     var errorDescription: String? { message }
 }
 
-private struct EmptyBody: Decodable {}
-
-struct PeachLoginRequest: Encodable {
-    let token: String
-    let next: String
-    let days: String
-}
-
 final class PeachAPI {
     nonisolated static let defaultAddress = "http://192.168.5.5:8900/"
 
@@ -89,13 +81,6 @@ final class PeachAPI {
         ]
         components.percentEncodedQuery = components.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
         return components.url
-    }
-
-    func entityImageURL(kind: String, id: Int) -> URL {
-        url(path: "/entity-image", query: [
-            URLQueryItem(name: "kind", value: kind),
-            URLQueryItem(name: "id", value: String(id))
-        ])
     }
 
     func login(password: String) async throws {
