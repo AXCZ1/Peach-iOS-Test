@@ -10,3 +10,7 @@ Standalone SwiftUI test app for the Peach media server at `http://192.168.5.5:89
 
 The app is intentionally separate from `NAS-ios`; it has its own Codemagic
 application and produces `Peach-iOS-Test-unsigned.ipa`.
+
+Device acceptance steps and the current delivered build are in
+[ACCEPTANCE.md](ACCEPTANCE.md). This first test version is not connected to the
+NAS iOS app and does not modify NAS build 82.
