@@ -18,7 +18,7 @@ final class PeachAPI: @unchecked Sendable {
     private let session: URLSession
     private let decoder = JSONDecoder()
 
-    init(baseURL: URL) {
+    init(baseURL: URL, session: URLSession? = nil) {
         self.baseURL = baseURL
         let configuration = URLSessionConfiguration.default
         configuration.httpCookieStorage = .shared
@@ -31,7 +31,7 @@ final class PeachAPI: @unchecked Sendable {
         #if !canImport(FoundationNetworking)
         configuration.waitsForConnectivity = LoginPolicy.waitsForConnectivity
         #endif
-        session = URLSession(configuration: configuration)
+        self.session = session ?? URLSession(configuration: configuration)
     }
 
     nonisolated static func normalizedBaseURL(_ raw: String) throws -> URL {
@@ -84,12 +84,13 @@ final class PeachAPI: @unchecked Sendable {
 
     /// `/cover?code=…` is the official full sleeve. `thumb=2` asks Peach for
     /// the grid-sized derivative; `version` busts only that code's cache.
-    func coverURL(code: String, thumb: Int = 2) -> URL? {
+    func coverURL(code: String, thumb: Int = 2, version: String? = nil) -> URL? {
         guard !code.isEmpty else { return nil }
         var components = URLComponents(url: url(path: "/cover"), resolvingAgainstBaseURL: false)!
         components.queryItems = [
             URLQueryItem(name: "code", value: code),
-            URLQueryItem(name: "thumb", value: String(thumb))
+            URLQueryItem(name: "thumb", value: String(thumb)),
+            URLQueryItem(name: "v", value: version ?? "")
         ]
         components.percentEncodedQuery = components.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
         return components.url
@@ -100,22 +101,32 @@ final class PeachAPI: @unchecked Sendable {
         url(path: "/thumb", query: [URLQueryItem(name: "id", value: String(id))])
     }
 
+    func timeline(id: Int) async throws -> TimelineMetadata {
+        try await get("/api/timeline", query: [URLQueryItem(name: "id", value: String(id))])
+    }
+
+    func timelineURL(id: Int, sheet: Int, source: String) -> URL {
+        url(path: "/timeline", query: [URLQueryItem(name: "id", value: String(id)),
+            URLQueryItem(name: "s", value: String(sheet)), URLQueryItem(name: "source", value: source)])
+    }
+
     func posterURL(id: Int) -> URL {
         url(path: "/poster", query: [URLQueryItem(name: "id", value: String(id))])
     }
 
-    func entityImageURL(kind: String, id: Int, thumb: Int = 1) -> URL {
+    func entityImageURL(kind: String, id: Int, thumb: Int = 1, version: String? = nil) -> URL {
         url(path: "/entity-image", query: [
-            URLQueryItem(name: "kind", value: kind),
+            URLQueryItem(name: "kind", value: EntityKind.canonical(kind)),
             URLQueryItem(name: "id", value: String(id)),
-            URLQueryItem(name: "thumb", value: String(thumb))
+            URLQueryItem(name: "thumb", value: String(thumb)),
+            URLQueryItem(name: "v", value: version ?? "")
         ])
     }
 
-    func logoURL(studio: String) -> URL? {
+    func logoURL(studio: String, version: String? = nil) -> URL? {
         guard !studio.isEmpty else { return nil }
         var components = URLComponents(url: url(path: "/logo"), resolvingAgainstBaseURL: false)!
-        components.queryItems = [URLQueryItem(name: "studio", value: studio)]
+        components.queryItems = [URLQueryItem(name: "studio", value: studio), URLQueryItem(name: "v", value: version ?? "")]
         components.percentEncodedQuery = components.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
         return components.url
     }
@@ -198,7 +209,7 @@ final class PeachAPI: @unchecked Sendable {
 
     func entity(kind: String, name: String) async throws -> PeachEntity {
         try await get("/api/entity", query: [
-            URLQueryItem(name: "kind", value: kind),
+            URLQueryItem(name: "kind", value: EntityKind.canonical(kind)),
             URLQueryItem(name: "name", value: name)
         ])
     }

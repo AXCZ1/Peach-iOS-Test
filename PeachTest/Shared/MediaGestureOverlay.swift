@@ -3,13 +3,16 @@ import UIKit
 
 /// Transparent gesture layer for immersive playback. A horizontal pan seeks and
 /// must not steal vertical paging; a vertical pan is declined so the enclosing
-/// ScrollView receives it. Single tap toggles playback; double tap skips ten
-/// seconds on the tapped half, matching the web immersive surface.
+/// ScrollView receives it. Double-tap locations are normalized to this view,
+/// not UIScreen, so the 25/50/25 regions survive rotation and letterboxing.
 struct MediaGestureOverlay: UIViewRepresentable {
     var onTap: () -> Void
     var onDoubleTap: (CGFloat) -> Void
     var onSeekChanged: (CGFloat) -> Void
     var onSeekEnded: (CGFloat) -> Void
+    var allowsHorizontalSeek = true
+    var onSeekBegan: () -> Void = {}
+    var onSeekCancelled: () -> Void = {}
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -61,6 +64,7 @@ final class GestureView: UIView, UIGestureRecognizerDelegate {
 
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return true }
+        guard coordinator?.parent.allowsHorizontalSeek == true else { return false }
         let velocity = pan.velocity(in: self)
         return abs(velocity.x) > abs(velocity.y) * 1.4
     }
@@ -70,16 +74,20 @@ final class GestureView: UIView, UIGestureRecognizerDelegate {
     }
 
     @objc private func handleDouble(_ recognizer: UITapGestureRecognizer) {
-        coordinator?.parent.onDoubleTap(recognizer.location(in: self).x)
+        coordinator?.parent.onDoubleTap(recognizer.location(in: self).x / max(bounds.width, 1))
     }
 
     @objc private func handlePan(_ recognizer: UIPanGestureRecognizer) {
         let translation = recognizer.translation(in: self).x
         switch recognizer.state {
+        case .began:
+            coordinator?.parent.onSeekBegan()
         case .changed:
             coordinator?.parent.onSeekChanged(translation)
-        case .ended, .cancelled, .failed:
+        case .ended:
             coordinator?.parent.onSeekEnded(translation)
+        case .cancelled, .failed:
+            coordinator?.parent.onSeekCancelled()
         default:
             break
         }

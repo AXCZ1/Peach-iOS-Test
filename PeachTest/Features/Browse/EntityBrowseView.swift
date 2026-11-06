@@ -48,13 +48,17 @@ struct EntityBrowseView: View {
                 ContentUnavailableView("无法读取索引", systemImage: "wifi.exclamationmark", description: Text(error))
                     .foregroundStyle(.white)
                 Spacer()
+            } else if items.isEmpty {
+                ContentUnavailableView("暂无\(kind.label)", systemImage: "square.grid.2x2", description: Text(query.isEmpty ? "当前媒体库没有这一类索引。" : "没有匹配的结果。"))
+                    .foregroundStyle(.white)
+                Spacer()
             } else {
                 ScrollView {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 14)], spacing: 18) {
                         ForEach(items) { facet in
-                            NavigationLink(value: EntityRoute(kind: kind.apiKind, name: facet.key)) {
+                            NavigationLink(value: EntityRoute(kind: EntityKind.canonical(facet.entityKind ?? kind.rawValue), name: facet.key)) {
                                 VStack(spacing: 8) {
-                                    EntityAvatar(api: api, kind: kind.apiKind, facet: facet)
+                                    EntityAvatar(api: api, kind: facet.entityKind ?? kind.rawValue, facet: facet)
                                     Text(facet.key)
                                         .font(.caption.weight(.medium))
                                         .foregroundStyle(.white.opacity(0.82))
@@ -77,45 +81,21 @@ struct EntityBrowseView: View {
     }
 
     private func load() async {
+        let requestedKind = kind
+        let requestedQuery = query
         loading = true
         error = nil
         do {
-            items = try await api.index(kind: kind.apiKind, query: query)
+            let result = try await api.index(kind: requestedKind.apiKind, query: requestedQuery)
+            guard kind == requestedKind, query == requestedQuery else { return }
+            items = result
         } catch let failure {
+            guard kind == requestedKind, query == requestedQuery else { return }
             error = failure.localizedDescription
         }
         loading = false
     }
-}
 
-enum EntityKind: String, CaseIterable, Identifiable {
-    case performer
-    case studio
-    case tag
-    case series
-    case creator
-
-    var id: String { rawValue }
-
-    var label: String {
-        switch self {
-        case .performer: return "演员"
-        case .studio: return "厂牌"
-        case .tag: return "标签"
-        case .series: return "系列"
-        case .creator: return "创作者"
-        }
-    }
-
-    var apiKind: String {
-        switch self {
-        case .performer: return "performers"
-        case .studio: return "studios"
-        case .tag: return "tags"
-        case .series: return "series"
-        case .creator: return "creators"
-        }
-    }
 }
 
 struct EntityAvatar: View {
@@ -126,8 +106,11 @@ struct EntityAvatar: View {
     var body: some View {
         ZStack {
             Circle().fill(PeachTheme.surface)
-            if let id = facet.entityID, facet.hasImage == true {
-                RemoteImage(url: api.entityImageURL(kind: kind, id: id))
+            if EntityKind.canonical(kind) == "studio", facet.hasLogo == true {
+                RemoteImage(url: api.logoURL(studio: facet.key, version: facet.logoVersion), contentMode: .fit)
+                    .clipShape(Circle())
+            } else if let id = facet.entityID, facet.hasImage == true {
+                RemoteImage(url: api.entityImageURL(kind: kind, id: id, version: facet.imageVersion))
                     .clipShape(Circle())
             } else {
                 Text(String(facet.key.prefix(1)))
@@ -202,7 +185,7 @@ struct EntityDetailView: View {
             ZStack {
                 Circle().fill(PeachTheme.surface)
                 if let entity, entity.hasImage {
-                    RemoteImage(url: api.entityImageURL(kind: kind, id: entity.id))
+                    RemoteImage(url: api.entityImageURL(kind: kind, id: entity.id, version: entity.imageVersion))
                         .clipShape(Circle())
                 } else {
                     Text(String(name.prefix(1))).font(.largeTitle.weight(.semibold)).foregroundStyle(.white.opacity(0.55))
@@ -252,7 +235,7 @@ struct EntityDetailView: View {
         error = nil
         do {
             var filter = LibraryFilter()
-            switch kind {
+            switch EntityKind.canonical(kind) {
             case "performer": filter.performer = name
             case "studio": filter.studio = name
             case "tag": filter.tag = name

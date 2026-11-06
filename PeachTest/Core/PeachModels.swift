@@ -71,6 +71,9 @@ struct PeachItem: Decodable, Identifiable, Hashable, Sendable {
     let hasCover: Bool
     let coverKey: String
     let coverVersion: String?
+    let coverFrame: CoverFrame?
+    let posterBox: PosterBox?
+    let performerEntities: [PeachEntityRef]
     let hasThumb: Bool
     let displayCode: String?
     let displayTitle: String?
@@ -102,6 +105,9 @@ struct PeachItem: Decodable, Identifiable, Hashable, Sendable {
         case releaseDate = "release_date"
         case hasCover = "has_cover"
         case coverKey = "cover_key"
+        case coverFrame = "cover_frame"
+        case posterBox = "poster_box"
+        case performerEntities = "performer_entities"
         case coverVersion = "cover_version"
         case hasThumb = "has_thumb"
         case displayCode = "display_code"
@@ -140,6 +146,9 @@ struct PeachItem: Decodable, Identifiable, Hashable, Sendable {
         tags = Self.tags(c, .tags)
         hasCover = Self.boolean(c, .hasCover) ?? false
         coverKey = (try? c.decodeIfPresent(String.self, forKey: .coverKey)) ?? ""
+        coverFrame = try c.decodeIfPresent(CoverFrame.self, forKey: .coverFrame)
+        posterBox = try c.decodeIfPresent(PosterBox.self, forKey: .posterBox)
+        performerEntities = try c.decodeIfPresent([PeachEntityRef].self, forKey: .performerEntities) ?? []
         coverVersion = try? c.decodeIfPresent(String.self, forKey: .coverVersion)
         hasThumb = Self.boolean(c, .hasThumb) ?? false
         displayCode = try? c.decodeIfPresent(String.self, forKey: .displayCode)
@@ -220,10 +229,7 @@ struct PeachItem: Decodable, Identifiable, Hashable, Sendable {
 
     var durationText: String {
         guard let duration, duration > 0 else { return "时长未知" }
-        let total = Int(duration.rounded())
-        let h = total / 3600
-        let m = (total % 3600) / 60
-        return h > 0 ? String(format: "%d:%02d", h, m) : "\(max(1, m)) 分钟"
+        return MediaClock.text(duration)
     }
 
     var sizeText: String? {
@@ -248,10 +254,12 @@ struct PeachItem: Decodable, Identifiable, Hashable, Sendable {
         return 0
     }
 
-    var performerRefs: [PeachEntityRef] { entityRefs["performer"] ?? [] }
+    var performerRefs: [PeachEntityRef] { entityRefs["performer"] ?? performerEntities }
     var studioRefs: [PeachEntityRef] { entityRefs["studio"] ?? [] }
     var creatorRefs: [PeachEntityRef] { entityRefs["creator"] ?? [] }
     var seriesRefs: [PeachEntityRef] { entityRefs["series"] ?? [] }
+
+    func replacing(oCount: Int) -> PeachItem { PeachItem(copying: self, oCount: oCount) }
 
     /// Copy with only the fields a write changed. Keeping the original optionals
     /// intact matters: `rating = 0` would mean one star less than "unrated",
@@ -276,6 +284,9 @@ struct PeachItem: Decodable, Identifiable, Hashable, Sendable {
         hasCover = item.hasCover
         coverKey = item.coverKey
         coverVersion = item.coverVersion
+        coverFrame = item.coverFrame
+        posterBox = item.posterBox
+        performerEntities = item.performerEntities
         hasThumb = item.hasThumb
         displayCode = item.displayCode
         displayTitle = item.displayTitle
@@ -304,6 +315,7 @@ struct PeachItem: Decodable, Identifiable, Hashable, Sendable {
 struct PeachFacet: Decodable, Identifiable, Hashable, Sendable {
     let key: String
     let count: Int
+    let entityKind: String?
     let entityID: Int?
     let representativeID: Int?
     let hasImage: Bool?
@@ -315,6 +327,7 @@ struct PeachFacet: Decodable, Identifiable, Hashable, Sendable {
     enum CodingKeys: String, CodingKey {
         case key = "k"
         case count = "n"
+        case entityKind = "entity_kind"
         case entityID = "entity_id"
         case representativeID = "rep"
         case hasImage = "has_image"
@@ -328,6 +341,7 @@ struct PeachFacet: Decodable, Identifiable, Hashable, Sendable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         key = try c.decode(String.self, forKey: .key)
         count = (try? c.decodeIfPresent(Int.self, forKey: .count)) ?? 0
+        entityKind = try c.decodeIfPresent(String.self, forKey: .entityKind)
         entityID = try? c.decodeIfPresent(Int.self, forKey: .entityID)
         representativeID = try? c.decodeIfPresent(Int.self, forKey: .representativeID)
         hasImage = try? c.decodeIfPresent(Bool.self, forKey: .hasImage)
@@ -340,6 +354,7 @@ struct PeachFacet: Decodable, Identifiable, Hashable, Sendable {
     init(key: String, count: Int) {
         self.key = key
         self.count = count
+        entityKind = nil
         entityID = nil
         representativeID = nil
         hasImage = nil

@@ -7,17 +7,15 @@ struct PlayerView: View {
     var startsMuted = false
     @Environment(\.dismiss) private var dismiss
     @StateObject private var model: PlaybackController
-    @State private var scrubValue = 0.0
-    @State private var scrubbing = false
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var gestureFeedback: String?
+    @State private var feedbackID = UUID()
     @State private var controlsVisible = true
-    private let seekSeconds: Double
 
     init(item: PeachItem, api: PeachAPI, startsMuted: Bool = false) {
         self.item = item
         self.api = api
         self.startsMuted = startsMuted
-        let stored = UserDefaults.standard.double(forKey: "peach.seek.seconds")
-        seekSeconds = stored >= 1 ? stored : 10
         _model = StateObject(wrappedValue: PlaybackController(api: api, item: item))
     }
 
@@ -27,7 +25,17 @@ struct PlayerView: View {
             if let player = model.player {
                 VideoSurface(player: player)
                     .ignoresSafeArea()
-                    .onTapGesture { withAnimation(.easeInOut(duration: 0.18)) { controlsVisible.toggle() } }
+                MediaGestureOverlay(
+                    onTap: { withAnimation(.easeInOut(duration: 0.18)) { controlsVisible.toggle() } },
+                    onDoubleTap: { fraction in showGesture(model.doubleTap(at: Double(fraction))) },
+                    onSeekChanged: { _ in }, onSeekEnded: { _ in }, allowsHorizontalSeek: false
+                )
+                .ignoresSafeArea()
+                .accessibilityElement()
+                .accessibilityLabel("视频画面")
+                .accessibilityAction(named: "播放或暂停") { model.togglePlayback() }
+                .accessibilityAction(named: "前进 10 秒") { model.skip(by: 10) }
+                .accessibilityAction(named: "后退 10 秒") { model.skip(by: -10) }
             }
 
             switch model.phase {
@@ -39,6 +47,11 @@ struct PlayerView: View {
                 EmptyView()
             }
 
+            if let gestureFeedback {
+                Text(gestureFeedback).font(.headline).foregroundStyle(.white)
+                    .padding(16).background(.black.opacity(0.5), in: Capsule())
+                    .allowsHitTesting(false)
+            }
             if controlsVisible {
                 chrome
                     .transition(.opacity)
@@ -46,14 +59,13 @@ struct PlayerView: View {
         }
         .statusBarHidden()
         .persistentSystemOverlays(.hidden)
-        .task {
-            model.setMuted(startsMuted)
-            await model.start()
+        .task(id: scenePhase) {
+            guard scenePhase == .active else { return }
+            await model.activate()
         }
+        .onAppear { model.setMuted(startsMuted) }
+        .onChange(of: scenePhase) { _, phase in model.setActive(phase == .active) }
         .onDisappear { model.stop() }
-        .onChange(of: model.currentTime) { _, value in
-            if !scrubbing { scrubValue = value }
-        }
         .onChange(of: model.isPlaying) { _, playing in
             guard playing else { return }
             withAnimation(.easeInOut(duration: 0.2)) { controlsVisible = false }
@@ -124,55 +136,23 @@ struct PlayerView: View {
 
             Spacer()
 
-            VStack(spacing: 14) {
-                HStack(spacing: 18) {
-                    Button { model.skip(by: -seekSeconds) } label: {
-                        Image(systemName: "gobackward.10").font(.system(size: 24, weight: .medium))
-                    }
-                    Button { model.togglePlayback() } label: {
-                        Image(systemName: model.isPlaying ? "pause.fill" : "play.fill")
-                            .font(.system(size: 26, weight: .bold))
-                            .frame(width: 64, height: 64)
-                            .background(PeachTheme.coral, in: Circle())
-                            .foregroundStyle(.black)
-                    }
-                    Button { model.skip(by: seekSeconds) } label: {
-                        Image(systemName: "goforward.10").font(.system(size: 24, weight: .medium))
-                    }
-                }
-                .foregroundStyle(.white)
-                .buttonStyle(.plain)
-
-                HStack(spacing: 10) {
-                    Text(clock(scrubbing ? scrubValue : model.currentTime))
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.white.opacity(0.7))
-                        .frame(width: 50, alignment: .trailing)
-                    Slider(value: $scrubValue, in: 0...max(model.duration, 1)) { editing in
-                        scrubbing = editing
-                        if editing { model.beginScrubbing() }
-                        else { model.endScrubbing(at: scrubValue) }
-                    }
-                    .tint(PeachTheme.coral)
-                    .accessibilityLabel("播放进度")
-                    Text(clock(model.duration))
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.white.opacity(0.7))
-                        .frame(width: 50, alignment: .leading)
-                }
-            }
+            PlaybackSeekBar(controller: model, api: api, item: item)
             .padding(.horizontal, 24)
             .padding(.bottom, 28)
             .background(LinearGradient(colors: [.clear, .black.opacity(0.8)], startPoint: .top, endPoint: .bottom))
         }
     }
 
-    private func clock(_ seconds: Double) -> String {
-        guard seconds.isFinite, seconds >= 0 else { return "0:00" }
-        let total = Int(seconds)
-        let h = total / 3600, m = (total % 3600) / 60, s = total % 60
-        return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
+    private func showGesture(_ message: String) {
+        let identifier = UUID()
+        feedbackID = identifier
+        gestureFeedback = message
+        Task {
+            try? await Task.sleep(for: .milliseconds(600))
+            if feedbackID == identifier { gestureFeedback = nil }
+        }
     }
+
 }
 
 struct VideoSurface: UIViewRepresentable {

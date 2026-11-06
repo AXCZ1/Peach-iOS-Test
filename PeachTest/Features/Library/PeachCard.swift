@@ -4,6 +4,7 @@ struct PeachCard: View {
     let item: PeachItem
     let api: PeachAPI
     var density: PeachDensity = .big
+    var portrait = false
 
     private var coverURL: URL? {
         guard item.hasCover else { return nil }
@@ -11,11 +12,73 @@ struct PeachCard: View {
     }
 
     var body: some View {
-        if density == .big {
+        if density == .big, portrait {
+            portraitCard
+        } else if density == .big {
             bigCard
         } else {
             denseCard
         }
+    }
+
+    private var portraitCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ZStack(alignment: .bottomTrailing) {
+                CoverPoster(item: item, api: api)
+                    .aspectRatio(3.0 / 4.0, contentMode: .fit)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                Text(item.durationText)
+                    .font(.caption.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(.white).padding(.horizontal, 8).padding(.vertical, 5)
+                    .background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 7))
+                    .padding(10)
+                Image(systemName: "externaldrive")
+                    .font(.system(size: 16)).foregroundStyle(.white.opacity(0.85))
+                    .padding(8).background(.black.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
+                    .padding(8).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                statusBadges.padding(8)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+            }
+            HStack(alignment: .top, spacing: 10) {
+                if let actor = item.performerRefs.first, actor.hasImage == true {
+                    RemoteImage(url: api.entityImageURL(kind: "performer", id: actor.id, version: actor.imageVersion))
+                        .frame(width: 36, height: 36).clipShape(Circle())
+                }
+                VStack(alignment: .leading, spacing: 9) {
+                    (Text(item.displayNumber).bold() + Text("  " + item.title))
+                        .font(.subheadline).foregroundStyle(.white.opacity(0.92))
+                        .lineLimit(2).multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    HStack(spacing: 9) {
+                        if let actor = item.performers.first {
+                            Label(actor, systemImage: "person")
+                        }
+                        if let date = item.releaseDate, !date.isEmpty {
+                            Label(date, systemImage: "calendar")
+                        }
+                        if let size = item.sizeText {
+                            Label(size, systemImage: "externaldrive")
+                        }
+                    }
+                    .font(.caption2).foregroundStyle(.white.opacity(0.5))
+                    .lineLimit(1).minimumScaleFactor(0.8)
+                    if !item.tags.isEmpty {
+                        FlowLayout(spacing: 6) {
+                            ForEach(Array(item.tags.prefix(2)), id: \.self) { tag in
+                                Text(tag).font(.caption).foregroundStyle(.white.opacity(0.65))
+                                    .padding(.horizontal, 9).padding(.vertical, 5)
+                                    .background(PeachTheme.field, in: RoundedRectangle(cornerRadius: 8))
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(12)
+        }
+        .background(PeachTheme.surface, in: RoundedRectangle(cornerRadius: 18))
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("library.card.\(item.id)")
     }
 
     private var bigCard: some View {

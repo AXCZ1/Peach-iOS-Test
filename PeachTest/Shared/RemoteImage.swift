@@ -62,7 +62,9 @@ struct RemoteImage: View {
         .task(id: url) {
             image = nil
             guard let url else { return }
-            image = await PeachImageCache.shared.image(for: url)
+            let loaded = await PeachImageCache.shared.image(for: url)
+            guard !Task.isCancelled else { return }
+            image = loaded
         }
     }
 }

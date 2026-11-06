@@ -1,4 +1,6 @@
+#if canImport(AVFoundation)
 import AVFoundation
+import Combine
 import Foundation
 
 /// Player state shared by the detail stage, the wall and immersive mode.
@@ -41,7 +43,7 @@ final class PlaybackController: ObservableObject {
     private var ticker: Task<Void, Never>?
     private var started = false
     private var stopped = false
-    private var markedPlayed = false
+    private var intent = PlaybackIntent()
     private var watchSeconds = 0.0
     private var seeks = 0
     private var lastTick: Date?
@@ -55,7 +57,8 @@ final class PlaybackController: ObservableObject {
         self.item = item
     }
 
-    func start() async {
+    private func start() async {
+        guard intent.isActive else { return }
         if stopped {
             // A page recycled by the immersive pager can be scrolled back into
             // view after teardown. Reopen a fresh stream session instead of
@@ -66,7 +69,7 @@ final class PlaybackController: ObservableObject {
             phase = .preparing
             player = nil
             didEnd = false
-            markedPlayed = false
+            intent.newSession()
             lastActivityAt = .distantPast
         }
         guard !started else { return }
@@ -77,9 +80,10 @@ final class PlaybackController: ObservableObject {
         } else if item.resumeTime > 0 {
             pendingResume = item.resumeTime
         }
+        let requestedSession = sessionID
         do {
-            let plan = try await api.streamPlan(id: item.id, sessionID: sessionID)
-            guard !stopped else { return }
+            let plan = try await api.streamPlan(id: item.id, sessionID: requestedSession)
+            guard requestedSession == sessionID, !stopped, intent.isActive, !Task.isCancelled else { return }
             let source: URL
             if let raw = plan.src, !raw.isEmpty {
                 source = api.mediaURL(raw)
@@ -97,42 +101,75 @@ final class PlaybackController: ObservableObject {
             self.player = player
             observe(player, item: playerItem)
             player.isMuted = isMuted
-            player.play()
+            applyPlaybackIntent()
             startTicker()
         } catch {
+            guard requestedSession == sessionID, !stopped, !Task.isCancelled else { return }
             phase = .failed(error.localizedDescription)
         }
     }
 
     func togglePlayback() {
-        guard let player else { return }
-        if player.timeControlStatus == .playing || player.rate > 0 {
-            pause()
-        } else {
-            resume()
+        intent.wantsPlayback.toggle()
+        applyPlaybackIntent()
+        if !intent.wantsPlayback { flushActivity() }
+    }
+
+    func doubleTap(at fraction: Double) -> String {
+        switch PlaybackTap.action(at: fraction) {
+        case .backward: skip(by: -10); return "后退 10 秒"
+        case .forward: skip(by: 10); return "前进 10 秒"
+        case .toggle:
+            togglePlayback()
+            return intent.wantsPlayback ? "播放" : "暂停"
         }
     }
 
-    /// Called when an immersive page scrolls back into view. A page that has
-    /// already prepared its player resumes; a fresh one starts its session.
-    func activate() async {
-        if started, !stopped {
-            if phase == .ready { resume() }
-            return
+    func setActive(_ active: Bool) {
+        intent.isActive = active
+        if !active {
+            player?.pause()
+            isPlaying = false
+            intent.scrubbing = false
+            isScrubbing = false
+            seekPreview = nil
+            flushActivity()
+            // A pending plan must not survive a page switch. Its late result is
+            // rejected by session identity, including a quick return to this page.
+            if started, player == nil, !stopped {
+                api.cancelStream(sessionID: sessionID)
+                sessionID = UUID().uuidString.replacingOccurrences(of: "-", with: "")
+                started = false
+            }
+        } else {
+            applyPlaybackIntent()
         }
-        // Reopening after teardown must build a new AVPlayerItem and observe it
-        // again; `start()` resets the dead session first.
+    }
+
+    func activate() async {
+        setActive(true)
+        if started, !stopped { return }
         await start()
     }
 
     func pause() {
-        player?.pause()
+        intent.wantsPlayback = false
+        applyPlaybackIntent()
         flushActivity()
     }
 
     func resume() {
-        lastTick = Date()
-        player?.play()
+        intent.wantsPlayback = true
+        applyPlaybackIntent()
+    }
+
+    private func applyPlaybackIntent() {
+        if intent.mayPlay, !stopped {
+            lastTick = Date()
+            player?.play()
+        } else {
+            player?.pause()
+        }
     }
 
     func seek(to time: Double) {
@@ -153,6 +190,7 @@ final class PlaybackController: ObservableObject {
 
     func beginScrubbing() {
         isScrubbing = true
+        intent.scrubbing = true
         player?.pause()
     }
 
@@ -168,8 +206,16 @@ final class PlaybackController: ObservableObject {
 
     func endScrubbing(at time: Double) {
         isScrubbing = false
+        intent.scrubbing = false
         seek(to: time)
-        player?.play()
+        applyPlaybackIntent()
+    }
+
+    func cancelScrubbing() {
+        isScrubbing = false
+        intent.scrubbing = false
+        seekPreview = nil
+        applyPlaybackIntent()
     }
 
     func setMuted(_ muted: Bool) {
@@ -185,6 +231,11 @@ final class PlaybackController: ObservableObject {
         }
         flushActivity(force: true)
         stopped = true
+        intent.isActive = false
+        intent.scrubbing = false
+        isScrubbing = false
+        isPlaying = false
+        seekPreview = nil
         removeObservers()
         player?.pause()
         player?.replaceCurrentItem(with: nil)
@@ -205,7 +256,7 @@ final class PlaybackController: ObservableObject {
 
     private func tick() {
         guard !stopped, let player else { return }
-        let playing = player.timeControlStatus == .playing
+        let playing = intent.mayPlay && player.timeControlStatus == .playing
         if playing {
             let now = Date()
             if let lastTick {
@@ -243,17 +294,13 @@ final class PlaybackController: ObservableObject {
     private func observe(_ player: AVPlayer, item playerItem: AVPlayerItem) {
         itemStatus = playerItem.observe(\.status, options: [.new, .initial]) { [weak self] item, _ in
             Task { @MainActor in
-                guard let self else { return }
+                guard let self, !self.stopped, self.player === player else { return }
                 switch item.status {
                 case .readyToPlay:
                     let seconds = item.duration.seconds
                     self.duration = seconds.isFinite ? seconds : (self.item.duration ?? 0)
                     if self.phase == .preparing { self.phase = .ready }
                     self.restorePositionIfNeeded(player)
-                    if !self.markedPlayed {
-                        self.markedPlayed = true
-                        Task { try? await self.api.markPlayed(id: self.item.id) }
-                    }
                 case .failed:
                     self.phase = .failed(Self.describe(item.error))
                 default: break
@@ -262,30 +309,47 @@ final class PlaybackController: ObservableObject {
         }
         itemError = playerItem.observe(\.error, options: [.new]) { [weak self] item, _ in
             guard let error = item.error else { return }
-            Task { @MainActor in self?.phase = .failed(Self.describe(error)) }
+            Task { @MainActor in
+                guard let self, !self.stopped, self.player === player else { return }
+                self.phase = .failed(Self.describe(error))
+            }
         }
         timeControlStatus = player.observe(\.timeControlStatus, options: [.new, .initial]) { [weak self] player, _ in
-            Task { @MainActor in self?.isPlaying = player.timeControlStatus == .playing }
+            Task { @MainActor in
+                guard let self, !self.stopped, self.player === player else { return }
+                let playing = player.timeControlStatus == .playing
+                if playing, !self.intent.mayPlay { player.pause() }
+                self.isPlaying = playing && self.intent.mayPlay
+                if self.intent.consumePlayMark(isPlaying: playing) {
+                    Task { try? await self.api.markPlayed(id: self.item.id) }
+                }
+            }
         }
         playbackLikelyToKeepUp = playerItem.observe(\.isPlaybackLikelyToKeepUp, options: [.new]) { [weak self] item, _ in
             guard item.isPlaybackLikelyToKeepUp else { return }
             Task { @MainActor in
-                if let self, case .preparing = self.phase, item.status == .readyToPlay { self.phase = .ready }
+                if let self, !self.stopped, self.player === player, case .preparing = self.phase, item.status == .readyToPlay { self.phase = .ready }
             }
         }
         loadedTimeRanges = playerItem.observe(\.loadedTimeRanges, options: [.new]) { [weak self] item, _ in
             guard let range = item.loadedTimeRanges.last?.timeRangeValue else { return }
             let seconds = CMTimeGetSeconds(CMTimeRangeGetEnd(range))
-            Task { @MainActor in self?.buffered = seconds }
+            Task { @MainActor in
+                guard let self, !self.stopped, self.player === player else { return }
+                self.buffered = seconds
+            }
         }
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak self] time in
             let seconds = time.seconds
             guard seconds.isFinite else { return }
-            Task { @MainActor in self?.currentTime = seconds }
+            Task { @MainActor in
+                guard let self, !self.stopped, self.player === player else { return }
+                self.currentTime = seconds
+            }
         }
         endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: playerItem, queue: .main) { [weak self] _ in
             Task { @MainActor in
-                guard let self else { return }
+                guard let self, !self.stopped, self.player === player, self.intent.isActive else { return }
                 self.didEnd = true
                 PlayerMemory.shared.clear(self.item.id)
                 self.flushActivity(force: true, ended: true)
@@ -294,7 +358,7 @@ final class PlaybackController: ObservableObject {
         }
         stallTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(45))
-            guard let self, !Task.isCancelled, self.phase == .preparing else { return }
+            guard let self, !Task.isCancelled, !self.stopped, self.player === player, self.phase == .preparing else { return }
             self.phase = .failed("播放源长时间没有响应。请检查手机与 Peach 是否在同一 Wi-Fi，或换一个 MP4 作品验证。")
         }
     }
@@ -342,4 +406,6 @@ final class PlaybackController: ObservableObject {
         return ns.localizedDescription
     }
 }
+
+#endif
 

@@ -11,7 +11,7 @@ let package = Package(
         .target(
             name: "PeachTestCore",
             path: "PeachTest/Core",
-            exclude: ["PeachSession.swift", "PlaybackController.swift", "Preferences.swift"]
+            exclude: ["PeachSession.swift", "Preferences.swift"]
         ),
         .testTarget(
             name: "PeachTestCoreTests",

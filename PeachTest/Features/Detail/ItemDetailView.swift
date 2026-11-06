@@ -6,7 +6,8 @@ struct ItemDetailView: View {
     @StateObject private var model: ItemDetailModel
     @State private var playerPresented = false
     @State private var toast: String?
-    @State private var undoAction: (() -> Void)?
+    @State private var undoAction: SingleUseAction?
+    @State private var toastID = UUID()
     @State private var busy = false
 
     init(item: PeachItem, api: PeachAPI) {
@@ -311,16 +312,15 @@ struct ItemDetailView: View {
     }
 
     private func toggleLater() async {
+        guard !busy else { return }
         busy = true
         defer { busy = false }
         do {
             let on = try await api.toggleWatchLater(id: current.id)
             await model.refresh()
+            let assetID = current.id
             showToast(on ? "已加入稍后看" : "已移出稍后看", undo: {
-                Task {
-                    _ = try? await api.toggleWatchLater(id: current.id)
-                    await model.refresh()
-                }
+                Task { await undoWrite(assetID: assetID, climax: false) }
             })
         } catch let failure {
             showToast(failure.localizedDescription, undo: nil)
@@ -328,6 +328,7 @@ struct ItemDetailView: View {
     }
 
     private func toggleLiked() async {
+        guard !busy else { return }
         busy = true
         defer { busy = false }
         let target = !current.liked
@@ -341,6 +342,7 @@ struct ItemDetailView: View {
     }
 
     private func toggleFeedback(_ kind: String) async {
+        guard !busy else { return }
         busy = true
         defer { busy = false }
         do {
@@ -354,30 +356,45 @@ struct ItemDetailView: View {
     }
 
     private func recordClimax() async {
+        guard !busy else { return }
         busy = true
         defer { busy = false }
         do {
             let result = try await api.feedback(id: current.id, kind: "o")
             await model.refresh()
+            let assetID = current.id
             showToast("已记一次高潮 · \(result.oCount ?? current.oCount)", undo: {
-                Task {
-                    _ = try? await api.feedback(id: current.id, kind: "o-undo")
-                    await model.refresh()
-                }
+                Task { await undoWrite(assetID: assetID, climax: true) }
             })
         } catch let failure {
             showToast(failure.localizedDescription, undo: nil)
         }
     }
 
+    private func undoWrite(assetID: Int, climax: Bool) async {
+        busy = true
+        defer { busy = false }
+        do {
+            if climax { _ = try await api.feedback(id: assetID, kind: "o-undo") }
+            else { _ = try await api.toggleWatchLater(id: assetID) }
+            await model.refresh()
+            showToast("已撤销", undo: nil)
+        } catch let failure {
+            await model.refresh()
+            showToast("撤销结果未确认：\(failure.localizedDescription)", undo: nil)
+        }
+    }
+
     private func showToast(_ message: String, undo: (() -> Void)?) {
+        let identifier = UUID()
+        toastID = identifier
         withAnimation(.easeOut(duration: 0.2)) {
             toast = message
-            undoAction = undo
+            undoAction = undo.map { SingleUseAction($0) }
         }
         Task {
             try? await Task.sleep(for: .seconds(3))
-            if toast == message {
+            if toastID == identifier {
                 withAnimation(.easeIn(duration: 0.2)) {
                     toast = nil
                     undoAction = nil
@@ -389,7 +406,8 @@ struct ItemDetailView: View {
 
 struct ToastBar: View {
     let message: String
-    var undo: (() -> Void)?
+    var undo: SingleUseAction?
+    @State private var consumed = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -399,11 +417,17 @@ struct ToastBar: View {
                 .lineLimit(2)
             Spacer(minLength: 0)
             if let undo {
-                Button("撤销") { undo() }
+                Button("撤销") {
+                    guard let action = undo.take() else { return }
+                    consumed = true
+                    action()
+                }
+                    .disabled(consumed)
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(PeachTheme.coral)
             }
         }
+        .onChange(of: undo?.id) { _, _ in consumed = false }
         .padding(.horizontal, 16)
         .padding(.vertical, 13)
         .background(.ultraThinMaterial, in: Capsule())

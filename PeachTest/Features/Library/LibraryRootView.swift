@@ -285,7 +285,7 @@ struct LibraryRootView: View {
                 LazyVGrid(columns: columns, spacing: preferences.density == .big ? 22 : 14) {
                     ForEach(model.items) { item in
                         NavigationLink(value: item) {
-                            PeachCard(item: item, api: api, density: preferences.density)
+                            PeachCard(item: item, api: api, density: preferences.density, portrait: true)
                         }
                         .buttonStyle(.plain)
                         .task { await model.loadMoreIfNeeded(current: item) }
