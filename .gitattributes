@@ -1,0 +1,11 @@
+* text=auto eol=lf
+*.sh text eol=lf
+*.py text eol=lf
+*.swift text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.xcconfig text eol=lf
+*.pbxproj text eol=lf
+*.xcscheme text eol=lf
+*.json text eol=lf
+*.plist text eol=lf
