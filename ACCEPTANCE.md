@@ -1,6 +1,11 @@
 # Peach iOS Test — 视频预览与播放墙验收
 
-更新：2026-11-07。本轮实现及本地检查已完成，准备手动 Codemagic 构建，尚未作 iPhone 真机验收。构建 9 保留回退，NAS 82 不变。
+更新：2026-11-07。构建 **11** 已完成编译、打包、下载及本地 IPA 校验，尚未作 iPhone 真机验收。构建 9 保留回退，NAS 82 不变。
+
+- 安装包：[Peach-iOS-Test-unsigned.11.ipa](C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.11.ipa)，1,420,727 字节。
+- SHA256：`389b6624b9870fbf9183054fe3c2910db88dc1e132577e80d3eabe5cc896674e`。
+- 源码 `317464a7f5b52a482d86d250348d719277b6ec8e`；Codemagic `6aee9b179c7ac8eab4e9bc93`。
+- 证据 `artifacts/codemagic-11/`：完整日志、云端和本地 IPA 校验；无签名 arm64、iOS 17.0。
 
 Bundle ID `com.axcz1.peachios.test`，显示名 `Peach Test`，最低 iOS 17.0，独立测试版。
 
@@ -16,7 +21,10 @@ Bundle ID `com.axcz1.peachios.test`，显示名 `Peach Test`，最低 iOS 17.0�
 ## 已验证与边界
 
 - 本地核心 33 项：31 通过、2 项环境接口测试跳过；这 2 项随后单独在真实隔离实例通过。新增模板重排、负坐标、有限集合、探索续页、缩放锚点、停留选片、30 帧裁切检查。
-- SwiftUI 修改文件语法解析通过；完整 iOS 编译及 Mac 播放器用例由 Codemagic 执行。语法检查不能代替编译。
+- Codemagic Debug/Release 各 37 项：35 项通过，2 项局域网用例跳过（本地已通过），0 失败；实际 PlaybackController 的倍速恢复、PiP 会话及迟到计划测试通过。iPhone ARM64 Release 编译成功。
+- 构建 10 因测试播放计划缺少必填 id 失败；修正数据并增加播放器创建断言后构建 11 通过。未用跳过测试绕过失败。
+- IPA 本地重新校验 ZIP、Info.plist、arm64 Mach-O、无签名和 SHA256，结果与云端一致。
+- NAS 82 仍为 19,135,903 字节，SHA256 FA01E9F509B5C269EDFF888FB872AE44624F050EB0BB16D799E8453D9C9E12E4；Actions disabled。
 - 55 部缓存各 30 帧，元数据/JPEG 尺寸核实；示例 /api/timeline、/timeline 返回 200。
 - 原 54 部源文件大小和 mtime 与生成前一致，后来新增第 55 条已由定时任务自动补齐。
 - 生产镜像仍 longmeidao/peach:0.52.0，容器运行中。业务写接口只在隔离 peach-ios-test 回归并恢复测试计数。

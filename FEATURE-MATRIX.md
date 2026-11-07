@@ -1,7 +1,7 @@
 # Peach iOS 功能对照表
 
 基准：软路由容器 longmeidao/peach:0.52.0（http://192.168.5.5:8900/），网页与容器内 peach 包源码；交互参考 NAS iOS。
-更新：2026-11-07。本轮修复已交付构建 9；安装包、构建证据与真机验收清单见 ACCEPTANCE.md。
+更新：2026-11-07。本轮增量已交付构建 11；安装包、构建证据与真机验收清单见 ACCEPTANCE.md。
 
 状态含义：
 
@@ -23,7 +23,7 @@
 | 播放记忆 | 本地记播放秒数，重开续播；播完清零；服务端 leave_ratio 兜底 | 本地 UserDefaults + GET /api/item.leave_ratio | 播放器与沉浸页 | 已实现·待真机 |
 | 观看统计 | 首次起播 play_count += 1；每 10 秒、暂停、拖动、结束上报真实观看秒数、位置、seek 次数 | POST /api/play、POST /api/activity | PlaybackController；只在有效活动会话首次 .playing 计数 | 已实现·待真机；非活动页面与延迟计划回归见测试 |
 | 播放源 | 服务端给 HLS 就播 HLS，否则 Range MP4；每格独立流会话，关闭时取消 | GET /api/stream-plan、POST /api/stream-cancel | PlaybackController | 已实现·待真机（MP4/MKV） |
-| 顶栏「播放墙」 | 二维封面墙，封面/缩略图切换；点开一张放大，墙后留暗场；可播放、稍后看、看详情、缩放；进入时有声（与网页一致） | GET /api/items、GET /cover、GET /thumb、POST /api/watch-later | 馆藏右上角播放墙；VideoWallView | 部分实现·待真机；无限平移等仍待实现 |
+| 顶栏「播放墙」 | 二维封面墙，封面/缩略图切换；点开一张放大，墙后留暗场；可播放、稍后看、看详情、缩放；进入时有声（与网页一致） | GET /api/items、GET /cover、GET /thumb、POST /api/watch-later | 馆藏右上角播放墙；VideoWallView | 原版几何、无限探索、二维相机及聚焦重排已实现·待真机 |
 | 顶栏「密度：大图 / 密集」 | 网页 localStorage.density 在 336px 与 168px 间切换，只影响目录网格，重开保留 | 本地存储 | 馆藏右上角密度按钮；Preferences.density | 已实现·待真机；大图为 3:4 正封卡，复用 poster_box 和演员资料；小图保持原布局 |
 | 图片页大图/小图 | 网页照片页用 photoSize，与视频网格密度分开保存 | 本地存储 | 本实例未做照片墙 | 待实现：后续阶段 |
 | 首页状态 | 全部／没看过／稍后看／已标记；fresh 为未播且无反馈，flagged 为高潮>0 或喜欢 | GET /api/items?state= | 馆藏状态条 | 已实现；隔离实例已验证 fresh/flagged/later 计数 |
