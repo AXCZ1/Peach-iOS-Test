@@ -8,14 +8,15 @@ import UniformTypeIdentifiers
 @MainActor
 enum OriginalVideoFrame {
     private static let context = CIContext()
+    private static let tolerance = CMTime(seconds: 0.35, preferredTimescale: 600)
 
     static func capture(asset: AVURLAsset, seconds: Double, hls: Bool) async throws -> CGImage {
         let time = CMTime(seconds: seconds, preferredTimescale: 600)
         if hls { return try await decodedFrame(asset: asset, at: time) }
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
-        generator.requestedTimeToleranceBefore = .zero
-        generator.requestedTimeToleranceAfter = CMTime(seconds: 0.05, preferredTimescale: 600)
+        generator.requestedTimeToleranceBefore = tolerance
+        generator.requestedTimeToleranceAfter = tolerance
         return try await withTaskCancellationHandler {
             try await generator.image(at: time).image
         } onCancel: {
@@ -46,7 +47,7 @@ enum OriginalVideoFrame {
         }
         defer { timeout.cancel() }
         let reached = await withTaskCancellationHandler {
-            await player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
+            await player.seek(to: time, toleranceBefore: tolerance, toleranceAfter: tolerance)
         } onCancel: {
             Task { @MainActor in item.cancelPendingSeeks() }
         }
@@ -57,7 +58,7 @@ enum OriginalVideoFrame {
         while ContinuousClock.now < deadline {
             try Task.checkCancellation()
             let itemTime = player.currentTime()
-            if itemTime >= time,
+            if itemTime >= time - tolerance,
                let pixel = output.copyPixelBuffer(forItemTime: itemTime, itemTimeForDisplay: nil) {
                 let image = CIImage(cvPixelBuffer: pixel)
                 if let frame = context.createCGImage(image, from: image.extent) { return frame }

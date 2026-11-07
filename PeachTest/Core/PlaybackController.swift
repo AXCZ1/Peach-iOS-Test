@@ -82,12 +82,12 @@ final class PlaybackController: ObservableObject {
         guard !started else { return }
         started = true
         phase = .preparing
-        if previewOnly {
-            pendingResume = (item.duration ?? 0) * 0.08
-        } else if let local = PlayerMemory.shared.position(for: item.id) {
-            pendingResume = local
-        } else if item.resumeTime > 0 {
-            pendingResume = item.resumeTime
+        if !previewOnly {
+            if let local = PlayerMemory.shared.position(for: item.id) {
+                pendingResume = local
+            } else if item.resumeTime > 0 {
+                pendingResume = item.resumeTime
+            }
         }
         let requestedSession = sessionID
         do {
@@ -110,12 +110,12 @@ final class PlaybackController: ObservableObject {
             let playerItem = AVPlayerItem(asset: asset)
             playerItem.preferredForwardBufferDuration = previewOnly ? 2 : 8
             let player = AVPlayer(playerItem: playerItem)
-            player.automaticallyWaitsToMinimizeStalling = true
+            player.automaticallyWaitsToMinimizeStalling = !previewOnly
             player.allowsExternalPlayback = true
             self.player = player
             observe(player, item: playerItem)
             player.isMuted = isMuted
-            applyPlaybackIntent()
+            if !previewOnly { applyPlaybackIntent() }
             startTicker()
         } catch {
             guard requestedSession == sessionID, !stopped, !Task.isCancelled else { return }
@@ -146,6 +146,7 @@ final class PlaybackController: ObservableObject {
         intent.isActive = active
         if !active {
             endBoost()
+            stopPreviewHops()
             player?.pause()
             isPlaying = false
             intent.scrubbing = false
@@ -159,6 +160,8 @@ final class PlaybackController: ObservableObject {
                 sessionID = UUID().uuidString.replacingOccurrences(of: "-", with: "")
                 started = false
             }
+        } else if previewOnly {
+            startPreviewHops()
         } else {
             applyPlaybackIntent()
         }
@@ -266,7 +269,7 @@ final class PlaybackController: ObservableObject {
         guard !stopped else { return }
         endBoost()
         isPiPActive = false
-        previewHop?.cancel(); previewHop = nil
+        stopPreviewHops()
         if !previewOnly, let player, !didEnd {
             let position = player.currentTime().seconds
             if position.isFinite, position > 1 { PlayerMemory.shared.save(position, for: item.id) }
@@ -343,8 +346,8 @@ final class PlaybackController: ObservableObject {
                     let seconds = item.duration.seconds
                     self.duration = seconds.isFinite ? seconds : (self.item.duration ?? 0)
                     if self.phase == .preparing { self.phase = .ready }
-                    self.restorePositionIfNeeded(player)
-                    self.startPreviewHops()
+                    if self.previewOnly { self.startPreviewHops() }
+                    else { self.restorePositionIfNeeded(player) }
                 case .failed:
                     self.phase = .failed(Self.describe(item.error))
                 default: break
@@ -408,23 +411,35 @@ final class PlaybackController: ObservableObject {
     }
 
     private func startPreviewHops() {
-        guard previewOnly, previewHop == nil else { return }
+        guard previewOnly, previewHop == nil, phase == .ready, intent.mayPlay, let player else { return }
+        let length = duration
         previewHop = Task { [weak self] in
             var index = 0
-            while !Task.isCancelled {
-                do { try await Task.sleep(for: .milliseconds(1400)) } catch { return }
-                guard let self, !self.stopped else { return }
-                guard self.intent.mayPlay else { continue }
-                index = (index + 1) % PreviewPlayback.positions.count
-                self.seek(to: self.duration * PreviewPlayback.positions[index])
+            do {
+                while !Task.isCancelled {
+                    let position = length * PreviewPlayback.positions[index]
+                    try await PreviewPlayback.playSample(on: player, at: position)
+                    index = (index + 1) % PreviewPlayback.positions.count
+                }
+            } catch {
+                guard let self, !Task.isCancelled, !self.stopped, self.player === player else { return }
+                player.pause()
+                self.phase = .failed(Self.describe(error))
             }
         }
+    }
+
+    private func stopPreviewHops() {
+        guard let previewHop else { return }
+        previewHop.cancel()
+        self.previewHop = nil
+        player?.currentItem?.cancelPendingSeeks()
     }
 
     private func restorePositionIfNeeded(_ player: AVPlayer) {
         guard let target = pendingResume else { return }
         pendingResume = nil
-        guard duration > 0, previewOnly || (target > 5 && target < duration - 10) else { return }
+        guard duration > 0, target > 5, target < duration - 10 else { return }
         player.seek(to: CMTime(seconds: target, preferredTimescale: 600),
                     toleranceBefore: .zero, toleranceAfter: .zero)
         currentTime = target

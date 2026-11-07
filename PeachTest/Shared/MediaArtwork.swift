@@ -139,6 +139,7 @@ struct PlaybackSeekBar: View {
     @ObservedObject var controller: PlaybackController
     let api: PeachAPI
     let item: PeachItem
+    var inlineTimes = false
     @State private var dragging = false
     @State private var value = 0.0
 
@@ -146,46 +147,23 @@ struct PlaybackSeekBar: View {
     private var fraction: Double { min(1, max(0, shownTime / max(controller.duration, 1))) }
 
     var body: some View {
-        VStack(spacing: 0) {
-            GeometryReader { geometry in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(.white.opacity(0.25)).frame(height: 3)
-                    Capsule().fill(PeachTheme.coral).frame(width: geometry.size.width * fraction, height: 3)
-                    Circle().fill(.white).frame(width: 12, height: 12)
-                        .offset(x: max(0, (geometry.size.width - 12) * fraction))
+        Group {
+            if inlineTimes {
+                HStack(spacing: 8) {
+                    clock(shownTime).fixedSize()
+                    track
+                    clock(controller.duration).fixedSize()
                 }
-                .frame(height: 44)
-                .contentShape(Rectangle())
-                .gesture(DragGesture(minimumDistance: 0)
-                    .onChanged { gesture in
-                        guard controller.duration > 0 else { return }
-                        if !dragging { dragging = true; controller.beginScrubbing() }
-                        value = controller.duration * min(1, max(0, gesture.location.x / max(1, geometry.size.width)))
+            } else {
+                VStack(spacing: 0) {
+                    track
+                    HStack {
+                        clock(shownTime)
+                        Spacer()
+                        clock(controller.duration)
                     }
-                    .onEnded { _ in
-                        guard dragging else { return }
-                        controller.endScrubbing(at: value)
-                        dragging = false
-                    })
-                .accessibilityElement()
-                .accessibilityLabel("播放进度")
-                .accessibilityValue("\(MediaClock.text(shownTime))，共 \(MediaClock.text(controller.duration))")
-                .accessibilityAdjustableAction { direction in
-                    controller.skip(by: direction == .increment ? 10 : -10)
-                }
-
-                if dragging || controller.seekPreview != nil {
-                    SeekThumbnail(api: api, item: item, time: shownTime, duration: controller.duration)
-                        .position(x: min(max(80, geometry.size.width * fraction), max(80, geometry.size.width - 80)), y: -60)
                 }
             }
-            .frame(height: 44)
-            HStack {
-                Text(MediaClock.text(shownTime))
-                Spacer()
-                Text(MediaClock.text(controller.duration))
-            }
-            .font(.caption2.monospacedDigit()).foregroundStyle(.white.opacity(0.75))
         }
         .onChange(of: controller.isScrubbing) { _, scrubbing in
             if !scrubbing { dragging = false }
@@ -193,5 +171,45 @@ struct PlaybackSeekBar: View {
         .onDisappear {
             if dragging { controller.cancelScrubbing(); dragging = false }
         }
+    }
+
+    private func clock(_ time: Double) -> some View {
+        Text(MediaClock.text(time)).font(.caption2.monospacedDigit()).foregroundStyle(.white.opacity(0.75))
+    }
+
+    private var track: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                Capsule().fill(.white.opacity(0.25)).frame(height: 3)
+                Capsule().fill(PeachTheme.coral).frame(width: geometry.size.width * fraction, height: 3)
+                Circle().fill(.white).frame(width: 12, height: 12)
+                    .offset(x: max(0, (geometry.size.width - 12) * fraction))
+            }
+            .frame(height: 44)
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0)
+                .onChanged { gesture in
+                    guard controller.duration > 0 else { return }
+                    if !dragging { dragging = true; controller.beginScrubbing() }
+                    value = controller.duration * min(1, max(0, gesture.location.x / max(1, geometry.size.width)))
+                }
+                .onEnded { _ in
+                    guard dragging else { return }
+                    controller.endScrubbing(at: value)
+                    dragging = false
+                })
+            .accessibilityElement()
+            .accessibilityLabel("播放进度")
+            .accessibilityValue("\(MediaClock.text(shownTime))，共 \(MediaClock.text(controller.duration))")
+            .accessibilityAdjustableAction { direction in
+                controller.skip(by: direction == .increment ? 10 : -10)
+            }
+
+            if dragging || controller.seekPreview != nil {
+                SeekThumbnail(api: api, item: item, time: shownTime, duration: controller.duration)
+                    .position(x: min(max(80, geometry.size.width * fraction), max(80, geometry.size.width - 80)), y: -60)
+            }
+        }
+        .frame(height: 44)
     }
 }

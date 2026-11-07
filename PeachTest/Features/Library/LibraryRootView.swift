@@ -51,8 +51,7 @@ struct LibraryRootView: View {
                         AccountHubView(api: api, session: session, libraryCount: libraries.count)
                     }
                 }
-                .padding(.bottom, 68)
-                bottomBar
+                .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
             }
             .navigationBarHidden(true)
             .toolbar(.hidden, for: .navigationBar)
@@ -295,10 +294,10 @@ struct LibraryRootView: View {
                     }
                 }
                 .padding(.horizontal, 20)
-                .padding(.bottom, 96)
+                .padding(.bottom, 12)
 
                 if model.hasMore {
-                    ProgressView().tint(PeachTheme.coral).padding(.bottom, 96)
+                    ProgressView().tint(PeachTheme.coral).padding(.bottom, 12)
                 }
             }
         }
@@ -357,34 +356,28 @@ struct LibraryRootView: View {
     }
 
     private var bottomBar: some View {
-        VStack {
-            Spacer()
-            HStack(spacing: 0) {
-                ForEach(RootTab.allCases) { item in
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.18)) { tab = item }
-                    } label: {
-                        VStack(spacing: 4) {
-                            Image(systemName: item.icon)
-                                .font(.system(size: 19, weight: .semibold))
-                            Text(item.rawValue)
-                                .font(.system(size: 10, weight: .medium))
-                        }
-                        .foregroundStyle(tab == item ? PeachTheme.coral : .white.opacity(0.42))
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 48)
+        HStack(spacing: 0) {
+            ForEach(RootTab.allCases) { item in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) { tab = item }
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: item.icon)
+                            .font(.system(size: 19, weight: .semibold))
+                        Text(item.rawValue)
+                            .font(.system(size: 10, weight: .medium))
                     }
-                    .buttonStyle(.plain)
+                    .foregroundStyle(tab == item ? PeachTheme.coral : .white.opacity(0.42))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 48)
                 }
+                .buttonStyle(.plain)
             }
-            .padding(.horizontal, 30)
-            .padding(.top, 6)
-            .padding(.bottom, 6)
-            .background(.ultraThinMaterial)
-            .background(PeachTheme.background.opacity(0.82))
-            .overlay(alignment: .top) { Rectangle().fill(PeachTheme.line).frame(height: 1) }
         }
-        .ignoresSafeArea(edges: .bottom)
+        .padding(.horizontal, 30)
+        .padding(.vertical, 6)
+        .background(.ultraThinMaterial, ignoresSafeAreaEdges: .bottom)
+        .background(PeachTheme.background.opacity(0.82), ignoresSafeAreaEdges: .bottom)
     }
 
     private var subtitle: String {

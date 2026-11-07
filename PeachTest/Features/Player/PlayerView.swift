@@ -6,6 +6,7 @@ struct PlayerView: View {
     let api: PeachAPI
     let preserveOnExit: Bool
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @StateObject private var session: PlayerPresentation
     @StateObject private var model: PlaybackController
     @StateObject private var orientation = PlaybackOrientation()
@@ -160,22 +161,36 @@ struct PlayerView: View {
 
             Spacer()
 
-            VStack(spacing: 0) {
-                PlaybackSeekBar(controller: model, api: api, item: item)
-                HStack(spacing: 14) {
-                    Spacer()
-                    playerIcon("heart", label: "记一次高潮") { Task { await recordClimax() } }
-                        .disabled(feedbackBusy)
-                    playerIcon("pip.enter", label: "小窗播放") { session.startPiP() }
-                        .opacity(session.pipPossible ? 1 : 0.45)
-                    playerIcon(orientation.landscape ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
-                               label: orientation.landscape ? "返回竖屏" : "横屏全屏") {
-                        model.endBoost()
-                        orientation.toggle { showToast("屏幕切换失败：\($0)") }
-                    }
-                }.frame(height: 44)
-            }.padding(.horizontal, 20).padding(.bottom, 8)
-                .background(LinearGradient(colors: [.clear, .black.opacity(0.8)], startPoint: .top, endPoint: .bottom))
+            Group {
+                if verticalSizeClass == .compact, !preserveOnExit {
+                    HStack(spacing: 8) {
+                        PlaybackSeekBar(controller: model, api: api, item: item, inlineTimes: true)
+                        HStack(spacing: 6) { playbackActions }
+                    }.padding(.bottom, 2)
+                } else {
+                    VStack(spacing: 0) {
+                        PlaybackSeekBar(controller: model, api: api, item: item)
+                        HStack(spacing: 14) {
+                            Spacer()
+                            playbackActions
+                        }.frame(height: 44)
+                    }.padding(.bottom, 8)
+                }
+            }
+            .padding(.horizontal, 20)
+            .background(LinearGradient(colors: [.clear, .black.opacity(0.8)], startPoint: .top, endPoint: .bottom))
+        }
+    }
+
+    @ViewBuilder private var playbackActions: some View {
+        playerIcon("heart", label: "记一次高潮") { Task { await recordClimax() } }
+            .disabled(feedbackBusy)
+        playerIcon("pip.enter", label: "小窗播放") { session.startPiP() }
+            .opacity(session.pipPossible ? 1 : 0.45)
+        playerIcon(orientation.landscape ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
+                   label: orientation.landscape ? "返回竖屏" : "横屏全屏") {
+            model.endBoost()
+            orientation.toggle { showToast("屏幕切换失败：\($0)") }
         }
     }
 

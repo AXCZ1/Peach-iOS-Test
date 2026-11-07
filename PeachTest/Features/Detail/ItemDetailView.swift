@@ -145,7 +145,7 @@ struct ItemDetailView: View {
             .disabled(busy)
             .accessibilityIdentifier("detail.climax")
 
-            PreviewFilmstrip(api: api, item: current)
+            PreviewFilmstrip(api: api, item: current, playbackPresented: playerPresented)
 
             if !current.performers.isEmpty {
                 section("演员") {

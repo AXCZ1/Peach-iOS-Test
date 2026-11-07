@@ -39,7 +39,40 @@ final class OriginalVideoFrameTests: XCTestCase {
         XCTAssertEqual(afterSecond, afterFirst, "Reopening the same source should only issue the one-byte validation probe")
     }
 
-    private func writeVideo(to url: URL) async throws {
+    func testPreviewSampleDoesNotFinishWhileMediaClockIsStalled() async throws {
+        let movie = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).mp4")
+        defer { try? FileManager.default.removeItem(at: movie) }
+        try await writeVideo(to: movie, frameCount: 90)
+        let player = AVPlayer(url: movie)
+        let item = try XCTUnwrap(player.currentItem)
+        let readyDeadline = ContinuousClock.now + .seconds(4)
+        while item.status == .unknown, ContinuousClock.now < readyDeadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(item.status, .readyToPlay)
+        var finished = false
+        let sample = Task {
+            try await PreviewPlayback.playSample(on: player, at: 0.5)
+            finished = true
+        }
+        defer { sample.cancel(); item.cancelPendingSeeks(); player.pause() }
+
+        let playingDeadline = ContinuousClock.now + .seconds(4)
+        while player.timeControlStatus != .playing, ContinuousClock.now < playingDeadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(player.timeControlStatus, .playing)
+        player.pause()
+        let pausedAt = player.currentTime().seconds
+        try await Task.sleep(for: .milliseconds(1550))
+        XCTAssertFalse(finished, "A buffer stall must not count toward the 1.4-second preview")
+
+        player.playImmediately(atRate: 1)
+        try await sample.value
+        XCTAssertGreaterThan(player.currentTime().seconds - pausedAt, 1.1)
+    }
+
+    private func writeVideo(to url: URL, frameCount: Int = 12) async throws {
         let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: [AVVideoCodecKey: AVVideoCodecType.h264,
                                                                            AVVideoWidthKey: 1280, AVVideoHeightKey: 720])
@@ -57,7 +90,7 @@ final class OriginalVideoFrameTests: XCTestCase {
         CVPixelBufferLockBaseAddress(pixel, [])
         if let bytes = CVPixelBufferGetBaseAddress(pixel) { memset(bytes, 127, CVPixelBufferGetDataSize(pixel)) }
         CVPixelBufferUnlockBaseAddress(pixel, [])
-        for index in 0..<12 {
+        for index in 0..<frameCount {
             let deadline = ContinuousClock.now + .seconds(3)
             while !input.isReadyForMoreMediaData, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
             guard input.isReadyForMoreMediaData,
