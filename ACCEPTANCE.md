@@ -1,3 +1,16 @@
+# Peach iOS Test — 构建 19 验收
+
+安装包：[Peach-iOS-Test-unsigned.19.ipa](C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.19.ipa)，1,552,673 字节，无签名 iPhone ARM64，iOS 17.0+。SHA256 `965a588b61f294e9c07ccd1c4fb6d20bcd982662fd041c4573c230f9422f6828`。源码 `618aac185ace1dabb2227bc672cceec8e3e09c60`；Codemagic `6aef3f1df43f28dd128f0a63`；日志及校验在 `artifacts/codemagic-19/`。
+
+- `LibraryRootView.swift`：底栏恢复原来贴屏幕底边的 60 点布局。馆藏滚动区域接到栏顶，去掉额外的底部占位。
+- `PeachAPI.swift`：原文件播放地址仍需有效登录。取票不附带浏览器来源头，避免域名反代的上游地址不同而返回 403。兼容回退和播放墙界面保留。
+- 实际 Peach 0.52.0 对 HMN-834 验证：来源不匹配返回相同的 403 提示；认证后无来源头可取票，未认证仍为 401；签发地址的文件首尾均返回 206。仅取票与读文件，未更改服务端或馆藏。
+- Mac Debug/Release 各 46 通过、3 跳过。反代条件下 H.264 直放及拖动、兼容回退和跨域拒绝通过；iPhone Release 编译与 IPA 校验通过。
+
+真机覆盖安装后，滚动馆藏确认列表接到底栏，切换索引和我的，确认三个入口可用。用原域名试播 HMN-834 并拖动一次，再确认墙内播放。保留构建 18 回退。
+
+---
+
 # Peach iOS Test — 构建 18 验收
 
 安装包：[Peach-iOS-Test-unsigned.18.ipa](C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.18.ipa)，1,552,120 字节，无签名 iPhone ARM64，iOS 17.0+。SHA256 `0f88a4be9ada0b5da11053f7efc974a1fbc12e04fff2185445fd1c0d69bbcf2b`。源码 `a50d94e310f07a7ff1fb902343aac4c6cad418e1`；Codemagic `6aef0d4804bc42b5d4ae7294`，日志和校验在 `artifacts/codemagic-18/`。保留构建 13 回退。

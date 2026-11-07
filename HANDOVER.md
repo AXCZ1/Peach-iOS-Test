@@ -1,5 +1,13 @@
 # 当前继续点（2026-11-07）
 
+独立 App **构建 19** 已校验并放入 Downloads。恢复原底栏位置和 60 点高度，馆藏内容接到栏顶。域名反代下的原文件播放取票不发送浏览器来源头，仍需认证；未改 Peach 服务端、媒体、NAS iOS 或播放墙布局。
+
+- IPA：C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.19.ipa；1,552,673 字节；SHA256 `965a588b61f294e9c07ccd1c4fb6d20bcd982662fd041c4573c230f9422f6828`。
+- 源码 `618aac185ace1dabb2227bc672cceec8e3e09c60`，Codemagic `6aef3f1df43f28dd128f0a63`。Debug/Release 各 46 通过、3 跳过；实际 HMN-834 取票 200、首尾 Range 206，未认证取票 401。
+- 真机按 ACCEPTANCE.md 首节检查底栏与 HMN-834。保留构建 18 回退。
+
+## 构建 18 历史
+
 独立 App **构建 18** 已打包校验并放入 Downloads。普通全屏、沉浸及播放墙内嵌使用原文件优先，AVPlayer 检查视频轨能否解码，必要时回退 Peach 既有兼容流。墙内切全屏沿用会话；未改服务端、域名、媒体、大图预览或 NAS iOS。
 
 - IPA：C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.18.ipa；1,552,120 字节；SHA256 `0f88a4be9ada0b5da11053f7efc974a1fbc12e04fff2185445fd1c0d69bbcf2b`。
