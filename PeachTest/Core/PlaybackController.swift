@@ -109,13 +109,17 @@ final class PlaybackController: ObservableObject {
                 do {
                     let source = try await api.originalPlaybackURL(id: item.id)
                     guard canInstallStream(for: requestedSession) else { return }
-                    install(AVURLAsset(url: source), note: "原文件直放", original: true)
-                    return
-                } catch let error as PeachAPIError where error.status == 404 || error.status == 405 {
-                    // Older Peach versions may not provide an original-file ticket.
-                    guard canInstallStream(for: requestedSession) else { return }
-                    originalUnavailable = true
+                    let asset = AVURLAsset(url: source)
+                    if try await Self.hasDecodableVideo(in: asset) {
+                        guard canInstallStream(for: requestedSession) else { return }
+                        install(asset, note: "原文件直放", original: true)
+                        return
+                    }
+                } catch where Self.canUseCompatibility(after: error) {
+                    // The endpoint or the device's decoder does not support this original.
                 }
+                guard canInstallStream(for: requestedSession) else { return }
+                originalUnavailable = true
             }
             requestedPlannedStream = true
             let plan = try await api.streamPlan(id: item.id, sessionID: requestedSession)
@@ -138,6 +142,19 @@ final class PlaybackController: ObservableObject {
             guard requestedSession == sessionID, !stopped, !Task.isCancelled else { return }
             phase = .failed(error.localizedDescription)
         }
+    }
+
+    private static func hasDecodableVideo(in asset: AVURLAsset) async throws -> Bool {
+        // An asset can be playable with just its audio even if no video track can be decoded.
+        for track in try await asset.loadTracks(withMediaType: .video) {
+            if try await track.load(.isDecodable) { return true }
+        }
+        return false
+    }
+
+    private static func canUseCompatibility(after error: Error) -> Bool {
+        let status = (error as? PeachAPIError)?.status
+        return status == 404 || status == 405 || isFormatFailure(error)
     }
 
     private func install(_ asset: AVURLAsset, note: String, original: Bool = false) {
@@ -485,7 +502,8 @@ final class PlaybackController: ObservableObject {
     }
 
     private static func isFormatFailure(_ error: Error?) -> Bool {
-        let formatCodes: [AVError.Code] = [.decodeFailed, .invalidSourceMedia, .fileFormatNotRecognized, .fileFailedToParse, .decoderNotFound]
+        let formatCodes: [AVError.Code] = [.decodeFailed, .invalidSourceMedia, .fileFormatNotRecognized, .fileFailedToParse,
+                                            .decoderNotFound, .incompatibleAsset, .formatUnsupported, .noSourceTrack]
         var cause = error.map { $0 as NSError }
         var failedToDecode = false
         while let current = cause {

@@ -5,7 +5,7 @@ import XCTest
 
 @MainActor
 final class OriginalPlaybackTests: XCTestCase {
-    func testHEVCOriginalPlaysAndSeeksOverHTTPRange() async throws {
+    func testH264OriginalPlaysAndSeeksOverHTTPRange() async throws {
         let fixture = try OriginalPlaybackFixture()
         defer { fixture.stop() }
         let controller = try makeController(fixture, id: 42001)
@@ -13,8 +13,9 @@ final class OriginalPlaybackTests: XCTestCase {
         await controller.activate()
         let player = try XCTUnwrap(controller.player, "\(controller.phase)")
         let asset = try XCTUnwrap(player.currentItem?.asset as? AVURLAsset)
-        try await waitFor("original HEVC playback") { controller.isPlaying && player.currentTime().seconds > 0.2 }
+        try await waitFor("original H.264 playback") { controller.isPlaying && player.currentTime().seconds > 0.2 }
         XCTAssertEqual(controller.formatNote, "原文件直放")
+        XCTAssertEqual(player.currentItem?.presentationSize, CGSize(width: 1920, height: 1080))
         controller.seek(to: 8)
         try await waitFor("playback after seeking") { player.currentTime().seconds > 8.1 && controller.isPlaying }
         controller.pause()
@@ -23,17 +24,34 @@ final class OriginalPlaybackTests: XCTestCase {
         XCTAssertGreaterThan(counts["original_ranges", default: 0], 0)
         XCTAssertNil(counts["plans"])
 
-        // The frame generator owns its asset so it cannot compete with the player's seeks.
-        let inspectionAsset = AVURLAsset(url: asset.url)
-        do {
-            let frame = try await OriginalVideoFrame.capture(asset: inspectionAsset, seconds: 8, hls: false)
-            XCTAssertEqual(frame.width, 1920)
-            XCTAssertEqual(frame.height, 1080)
-        } catch {
-            let details = error as NSError
-            let tracks = try? await inspectionAsset.loadTracks(withMediaType: .video)
-            XCTFail("HEVC frame decode over HTTP: \(details.domain) \(details.code) (video tracks: \(tracks?.count ?? -1)) — \(details.localizedDescription)")
-        }
+        let (download, response) = try await URLSession.shared.download(from: asset.url)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+        let local = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).mp4")
+        try FileManager.default.moveItem(at: download, to: local)
+        defer { try? FileManager.default.removeItem(at: local) }
+        let frame = try await OriginalVideoFrame.capture(asset: AVURLAsset(url: local), seconds: 8, hls: false)
+        XCTAssertEqual(frame.width, 1920)
+        XCTAssertEqual(frame.height, 1080)
+    }
+
+    func testHEVCOriginalTicketServesNativeTrackOverHTTPRange() async throws {
+        let fixture = try OriginalPlaybackFixture()
+        defer { fixture.stop() }
+        let api = PeachAPI(baseURL: fixture.baseURL)
+        let url = try await api.originalPlaybackURL(id: 42005)
+        let asset = AVURLAsset(url: url)
+        let tracks = try await asset.loadTracks(withMediaType: .video)
+        let track = try XCTUnwrap(tracks.first)
+        let formats = try await track.load(.formatDescriptions)
+        // AVFoundation may normalize the ISO `hev1` sample entry to `hvc1`.
+        let hevcTypes: Set<UInt32> = [0x68657631, 0x68766331]
+        XCTAssertTrue(formats.contains { hevcTypes.contains(CMFormatDescriptionGetMediaSubType($0)) })
+        let decodable = try await track.load(.isDecodable)
+        print("Cloud HEVC track reports decodable: \(decodable)")
+        let counts = try await fixture.counts()
+        XCTAssertEqual(counts["tickets"], 1)
+        XCTAssertGreaterThan(counts["original_ranges", default: 0], 0)
+        XCTAssertNil(counts["plans"])
     }
 
     func testFormatFailureSwitchesOnceAndPreservesPausedPosition() async throws {
@@ -81,6 +99,21 @@ final class OriginalPlaybackTests: XCTestCase {
         guard case .failed = foreign.phase else { return XCTFail("Foreign playback ticket was accepted") }
         let counts = try await fixture.counts()
         XCTAssertEqual(counts["tickets"], 2)
+        XCTAssertEqual(counts["plans"], 1)
+    }
+
+    func testAudioOnlyOriginalUsesCompatibilityVideoInstead() async throws {
+        let fixture = try OriginalPlaybackFixture()
+        defer { fixture.stop() }
+        let controller = try makeController(fixture, id: 42006)
+        defer { controller.stop(); PlayerMemory.shared.clear(42006) }
+        await controller.activate()
+        XCTAssertEqual(controller.formatNote, "原始 MP4 流")
+        try await waitFor("video from the compatibility stream") {
+            controller.isPlaying && controller.player?.currentItem?.presentationSize.width == 1920
+        }
+        let counts = try await fixture.counts()
+        XCTAssertEqual(counts["tickets"], 1)
         XCTAssertEqual(counts["plans"], 1)
     }
 

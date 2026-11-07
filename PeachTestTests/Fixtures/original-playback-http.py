@@ -7,7 +7,10 @@ from threading import Lock
 from urllib.parse import parse_qs, urlsplit
 
 
-VIDEO = Path(__file__).with_name("hev1-tail.mp4").read_bytes()
+FIXTURES = Path(__file__).parent
+AVC = (FIXTURES / "avc-tail.mp4").read_bytes()
+HEVC = (FIXTURES / "hev1-tail.mp4").read_bytes()
+AUDIO = (FIXTURES / "audio-only.m4a").read_bytes()
 COUNTS = Counter()
 LOCK = Lock()
 
@@ -61,7 +64,13 @@ class Fixture(BaseHTTPRequestHandler):
             return self.json({}, 401)
         if not original and route.path != "/compatible.mp4":
             return self.json({}, 404)
-        end = len(VIDEO) - 1
+        if route.path == "/external-stream/42005":
+            video = HEVC
+        elif route.path == "/external-stream/42006":
+            video = AUDIO
+        else:
+            video = AVC
+        end = len(video) - 1
         start = 0
         match = re.fullmatch(r"bytes=(\d+)-(\d*)", self.headers.get("Range", ""))
         if match:
@@ -76,11 +85,11 @@ class Fixture(BaseHTTPRequestHandler):
         self.send_header("Accept-Ranges", "bytes")
         self.send_header("Content-Length", str(end - start + 1))
         if match:
-            self.send_header("Content-Range", f"bytes {start}-{end}/{len(VIDEO)}")
+            self.send_header("Content-Range", f"bytes {start}-{end}/{len(video)}")
         self.end_headers()
         if self.command != "HEAD":
             try:
-                self.wfile.write(VIDEO[start:end + 1])
+                self.wfile.write(video[start:end + 1])
             except (BrokenPipeError, ConnectionResetError):
                 pass
 
