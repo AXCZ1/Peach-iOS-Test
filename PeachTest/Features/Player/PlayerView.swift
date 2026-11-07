@@ -93,7 +93,7 @@ struct PlayerView: View {
     private var screenGestures: some View {
         GeometryReader { geometry in
             let timeForDrag: (CGFloat, Double) -> Double = { dx, origin in
-                origin + Double(dx / max(1, geometry.size.width)) * model.duration
+                origin + Double(dx / max(1, geometry.size.width)) * model.duration * 0.5
             }
             MediaGestureOverlay(
                 onTap: { withAnimation(.easeInOut(duration: 0.18)) { controlsVisible.toggle() } },
