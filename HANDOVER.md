@@ -1,5 +1,15 @@
 # 当前继续点（2026-11-07）
 
+当前交付是独立 App **构建 12**，用户自行配置域名，本轮只改 App；不接入 NAS iOS，也不改播放墙内嵌播放器、服务端或媒体。
+
+- IPA：C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.12.ipa；1,511,320 字节；SHA256 `1cae105c790a73b240e2bfb96e5fd52da85e33f5e35a255ee5e839a27b89db97`。
+- 构建 12 源码 `9e968bc9c11c7f94644695d329f716a075584ea2`；Codemagic `6aeed913ab4a65afcf3fa24c` 已完成，证据在 `artifacts/codemagic-12/`。Debug/Release 各 40 通过、3 跳过；本地 HTTP Cookie 续期测试通过，真机待验收。
+- PlayerView、ImmersiveView、PlaybackOrientation：去掉影院模式，普通播放直接全屏，按钮切换横屏。WallFocusView、VideoWallView 未改；正常播放会话及 PiP 路径保留。
+- PeachSession、SavedPeachPassword、PeachAPI：HTTPS 域名、设备钥匙串及 Cookie 续期；无服务端认证改动。MediaDiskCache、CachedPreviewAsset、OriginalVideoFrame、PreviewFilmstrip：封面、原尺寸预览、受限 MP4 片段缓存。HLS 预览视频仍在线播放。
+- 验收见 ACCEPTANCE.md 首节。回退：构建 11 IPA 保留；修改前源码 bundle `backups/standalone-cache-20261107-152305/source.bundle`（`fc0205f`）。NAS 82 SHA256 已核对无变化。继续仅手动跑 Codemagic `ios-unsigned-ipa`，不启用 Actions、不启动 Simulator。
+
+## 构建 11 历史
+
 本轮已授权执行，不再是规划任务。视频预览、30 张截图、单行筛选、倍速、播放模式及原版播放墙已交付构建 11。未接入 NAS iOS，不动构建 82。下文构建 9 是回退历史。
 
 - 用户录屏 QQ2026117-25419.mp4 的 12–20 秒是封面内静音原视频短片段，不是图片轮播；30 张图用于详情/进度条。

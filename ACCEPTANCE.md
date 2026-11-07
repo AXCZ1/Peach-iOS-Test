@@ -1,4 +1,32 @@
-# Peach iOS Test — 视频预览与播放墙验收
+# Peach iOS Test — 构建 12 验收
+
+安装包：[Peach-iOS-Test-unsigned.12.ipa](C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.12.ipa)，1,511,320 字节，无签名 iPhone ARM64，iOS 17.0+。SHA256 `1cae105c790a73b240e2bfb96e5fd52da85e33f5e35a255ee5e839a27b89db97`。源码 `9e968bc9c11c7f94644695d329f716a075584ea2`；Codemagic `6aeed913ab4a65afcf3fa24c`；日志与本地校验在 `artifacts/codemagic-12/`。
+
+- 普通播放直接全屏；普通和沉浸播放器取消影院模式，全屏图标切换横屏，保留小窗、长按 2×、双击分区、进度条和记录。播放墙的内嵌播放器未修改。
+- 详情 30 张预览保留原时间点，点开时从播放流解码该时刻的原尺寸画面，支持双指缩放，缓存为无损 PNG。缩略条与进度条复用已有小图；没有重生成服务端预览。大图卡片仍在停留 3 秒后，依次播放总时长 8%、22%、36%、50%、64%、78%、90% 的静音短片段，约 1.4 秒跳一次。
+- App 支持 HTTPS 域名及原局域网 HTTP 地址。成功登录后，密码按服务地址存 iOS 钥匙串；Cookie 失效可自动续登，退出登录清除保存的密码。构建 11 已登录的用户升级后，可以继续使用原 Cookie，首次重新输入密码时才会存入钥匙串。域名与反代由用户配置；本轮未改服务端、NAS iOS、构建 82 或媒体。
+- 封面、预览拼图及已打开的原图跨重启缓存。大图 MP4 短片仅缓存用过且可验证的 Range 字节块；不支持此条件的 MP4 和 HLS 仍在线播放。每服务地址限制为图片/元数据 128 MiB、原图 256 MiB、视频片段 256 MiB，空间不足淘汰旧缓存。“我的 → 本机缓存”可以清除。
+
+云端 Debug/Release 各 43 项：40 通过、3 跳过（2 个隔离实例测试、1 个本地 HTTP 测试），无失败。Mac 用实际 AVFoundation 对测试 MP4 解码 1280×720 并存 PNG，重开复用磁盘 Range 块；隔离实例的真实媒体流请求返回 503，实际馆藏的片段缓存待真机核验。本地 HTTP 测试通过：初次登录及 Cookie 清除后的并发请求，总共两次表单登录。IPA 本地独立校验与云端一致。未启动模拟器。
+
+真机验收：
+
+1. 覆盖安装构建 12，配置好的 HTTPS 域名首次输入密码后登录，结束 App 再打开无需输入；退出登录再打开需要重新输入。原局域网 IP 也可登录。
+2. 详情点播放直接全屏；单击显示控制，点全屏图标进横屏，再返回；检查 MP4/MKV、进度条、长按、双击和 PiP。播放墙内嵌操作与构建 11 一致。
+3. 详情点开 MP4 和 MKV 的预览图，检查实际像素、放大和横滑；再打开同一张图验证缓存。大图停留、滚动恢复封面和“我的”清除缓存正常。
+
+源码改动按入口核对：
+
+| 范围 | 修改文件 |
+| --- | --- |
+| 全屏与横屏 | PeachTestApp.swift、PlayerView.swift、PlaybackOrientation.swift、ImmersiveView.swift |
+| 域名、密码与续登 | RootView.swift、PeachSession.swift、PeachAPI.swift、LoginPolicy.swift、LoginView.swift、SavedPeachPassword.swift、AccountHubView.swift |
+| 原图与缓存 | OriginalVideoFrame.swift、PreviewFilmstrip.swift、MediaPresentation.swift、MediaArtwork.swift、RemoteImage.swift、MediaDiskCache.swift、CachedPreviewAsset.swift、PlaybackController.swift |
+| 回归测试 | LibraryFilterTests.swift、LoginRecoveryTests.swift、MediaCacheTests.swift、OriginalVideoFrameTests.swift |
+
+---
+
+# 构建 11 — 视频预览与播放墙验收记录
 
 更新：2026-11-07。构建 **11** 已完成编译、打包、下载及本地 IPA 校验，尚未作 iPhone 真机验收。构建 9 保留回退，NAS 82 不变。
 
