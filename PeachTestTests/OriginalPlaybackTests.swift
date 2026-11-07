@@ -12,19 +12,15 @@ final class OriginalPlaybackTests: XCTestCase {
         defer { controller.stop(); PlayerMemory.shared.clear(42001) }
         await controller.activate()
         let player = try XCTUnwrap(controller.player, "\(controller.phase)")
-        let item = try XCTUnwrap(player.currentItem)
-        let output = AVPlayerItemVideoOutput(pixelBufferAttributes: nil)
-        item.add(output)
-        var frame: CVPixelBuffer?
-        try await waitFor("1080p HEVC frame from the original HTTP URL") {
-            guard controller.isPlaying else { return false }
-            frame = output.copyPixelBuffer(forItemTime: player.currentTime(), itemTimeForDisplay: nil)
-            return frame != nil
-        }
-        XCTAssertEqual(CVPixelBufferGetWidth(try XCTUnwrap(frame)), 1920)
+        let asset = try XCTUnwrap(player.currentItem?.asset as? AVURLAsset)
+        try await waitFor("original HEVC playback") { controller.isPlaying && player.currentTime().seconds > 0.2 }
         XCTAssertEqual(controller.formatNote, "原文件直放")
         controller.seek(to: 8)
         try await waitFor("playback after seeking") { player.currentTime().seconds > 8.1 && controller.isPlaying }
+        controller.pause()
+        let frame = try await OriginalVideoFrame.capture(asset: asset, seconds: 8, hls: false)
+        XCTAssertEqual(frame.width, 1920)
+        XCTAssertEqual(frame.height, 1080)
         let counts = try await fixture.counts()
         XCTAssertEqual(counts["tickets"], 1)
         XCTAssertGreaterThan(counts["original_ranges", default: 0], 0)
