@@ -84,15 +84,22 @@ struct PreviewFilmstrip: View {
     @State private var expanded = false
     @State private var reload = 0
     @State private var frameRetry = 0
-    @State private var stripVisible = false
     @State private var visibleIndices: Set<Int> = []
     @State private var frames: [MediaCacheKey: FrameState] = [:]
 
     private var stripRequests: [FrameRequest] {
-        guard scenePhase == .active, !playbackPresented, !expanded, stripVisible, let metadata else { return [] }
-        return visibleIndices.sorted().filter { $0 < min(30, metadata.frames ?? 0) }.map {
-            request(at: metadata.sampleTime(at: $0))
+        guard scenePhase == .active, !playbackPresented, !expanded, let metadata else { return [] }
+        let count = min(30, metadata.frames ?? 0)
+        guard count > 0 else { return [] }
+        let visible = visibleIndices.filter { $0 < count }.sorted()
+        let indices: [Int]
+        if let last = visible.last, last > 1 {
+            indices = visible + Array((last + 1)..<min(count, last + 3))
+        } else {
+            // Keep the same first batch when the user scrolls down to the strip.
+            indices = Array(0..<min(4, count))
         }
+        return indices.map { request(at: metadata.sampleTime(at: $0)) }
     }
 
     var body: some View {
@@ -118,13 +125,8 @@ struct PreviewFilmstrip: View {
                 HStack { Text(error).font(.footnote); Button("重试") { reload += 1 } }.foregroundStyle(.secondary)
             } else { ProgressView().tint(PeachTheme.coral) }
         }
-        .onGeometryChange(for: Bool.self) { proxy in
-            let frame = proxy.frame(in: .scrollView)
-            let viewport = CGRect(origin: .zero, size: proxy.bounds(of: .scrollView)?.size ?? .zero)
-            return frame.intersection(viewport).height > 0
-        } action: { stripVisible = $0 }
         .task(id: LoadID(frames: requests, retry: frameRetry)) {
-            await loadOriginals(requests, waitForScroll: true)
+            await loadOriginals(requests)
         }
         .task(id: "\(item.id):\(reload)") {
             error = nil
@@ -188,7 +190,7 @@ struct PreviewFilmstrip: View {
                 .foregroundStyle(.white).padding().accessibilityLabel("关闭预览图")
         }
         .task(id: LoadID(frames: requests, retry: frameRetry)) {
-            await loadOriginals(requests, waitForScroll: false)
+            await loadOriginals(requests)
         }
     }
 
@@ -223,43 +225,59 @@ struct PreviewFilmstrip: View {
         frameRetry += 1
     }
 
-    private func loadOriginals(_ requests: [FrameRequest], waitForScroll: Bool) async {
+    private func loadOriginals(_ requests: [FrameRequest]) async {
         guard !requests.isEmpty, !Task.isCancelled else { return }
-        // Keep full-resolution bitmaps in memory only for the current viewport.
+        // Retain only the current window; older originals live in the disk cache.
         let keys = Set(requests.map(\.key))
         frames = frames.filter { keys.contains($0.key) }
+        var misses: [FrameRequest] = []
         for request in requests where frames[request.key] == nil {
-            do {
-                if let data = await MediaDiskCache.shared.read(request.key), let cached = UIImage(data: data) {
-                    try Task.checkCancellation()
-                    frames[request.key] = .image(cached)
-                    continue
+            let data = await MediaDiskCache.shared.read(request.key)
+            guard !Task.isCancelled else { return }
+            if let data, let image = UIImage(data: data) {
+                frames[request.key] = .image(image)
+            } else {
+                misses.append(request)
+            }
+        }
+        guard !misses.isEmpty, !Task.isCancelled else { return }
+
+        let session = UUID().uuidString
+        defer { api.cancelStream(sessionID: session) }
+        do {
+            let plan = try await api.streamPlan(id: item.id, sessionID: session)
+            try Task.checkCancellation()
+            let url = try api.playbackURL(plan: plan, id: item.id, sessionID: session)
+            let cookies = HTTPCookieStorage.shared.cookies(for: url) ?? []
+            let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPCookiesKey": cookies])
+            await withTaskGroup(of: Void.self) { writes in
+                var writing = false
+                for request in misses {
+                    do {
+                        let frame = try await OriginalVideoFrame.capture(asset: asset, seconds: request.seconds,
+                                                                         hls: plan.protocolName == "hls")
+                        try Task.checkCancellation()
+                        frames[request.key] = .image(UIImage(cgImage: frame))
+                        // Encode at most one PNG while the next frame is being decoded.
+                        if writing { _ = await writes.next() }
+                        guard !Task.isCancelled else { return }
+                        writes.addTask(priority: .utility) {
+                            guard !Task.isCancelled, let data = try? OriginalVideoFrame.png(frame), !Task.isCancelled else { return }
+                            await MediaDiskCache.shared.store(data, for: request.key)
+                        }
+                        writing = true
+                    } catch {
+                        guard !Task.isCancelled else { return }
+                        frames[request.key] = .failed(error.localizedDescription)
+                    }
                 }
-                if waitForScroll { try await Task.sleep(for: .milliseconds(350)) }
-                try Task.checkCancellation()
-                let frame = try await captureOriginal(at: request.seconds)
-                try Task.checkCancellation()
-                frames[request.key] = .image(UIImage(cgImage: frame))
-                if let data = try? await Task.detached(priority: .utility, operation: { try OriginalVideoFrame.png(frame) }).value,
-                   !Task.isCancelled {
-                    await MediaDiskCache.shared.store(data, for: request.key)
-                }
-            } catch {
-                guard !Task.isCancelled else { return }
+            }
+        } catch {
+            guard !Task.isCancelled else { return }
+            for request in misses {
                 frames[request.key] = .failed(error.localizedDescription)
             }
         }
-    }
-
-    private func captureOriginal(at seconds: Double) async throws -> CGImage {
-        let session = UUID().uuidString
-        defer { api.cancelStream(sessionID: session) }
-        let plan = try await api.streamPlan(id: item.id, sessionID: session)
-        try Task.checkCancellation()
-        let url = try api.playbackURL(plan: plan, id: item.id, sessionID: session)
-        let cookies = HTTPCookieStorage.shared.cookies(for: url) ?? []
-        let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPCookiesKey": cookies])
-        return try await OriginalVideoFrame.capture(asset: asset, seconds: seconds, hls: plan.protocolName == "hls")
     }
 }
 
