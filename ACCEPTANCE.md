@@ -1,3 +1,16 @@
+# Peach iOS Test — 构建 26 验收
+
+安装包：[Peach-iOS-Test-unsigned.26.ipa](C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.26.ipa)，20,916,539 字节，无签名 iPhone ARM64，iOS 17.0+。SHA256 `c7891cca8b57731240a605a7a9b6576b8fe5b561018a1db22b95716d55dd749d`。源码 `9736b8818d1b184d04769a60b1c0c32f14425407`；Codemagic `6aef8a454b804ab4e2e0ea3a`。本机校验和云端日志见 `artifacts/codemagic-26/`。
+
+- `PreviewFilmstrip.swift`：详情打开预取前四张，横滑时预取后面两张，优先读取本机缓存。取到一张即显示，点开复用同一张原图。退出详情或开始播放时停止预取。
+- `OriginalVideoFrame.swift`、`VLCOriginalPlayer.swift`：详情使用 iPhone 的 AVFoundation 或 VLCKit 从原文件取帧，按原分辨率缓存。升级后首次读取会从原文件重建帧缓存，旧帧随原有上限回收。
+- `PlaybackController.swift`、`PreviewVideoSample.swift`、`PeachAPI.swift`、`PeachModels.swift`：大图静音片段改走原文件，保留停留触发和分段规则，移除旧转码流入口。普通播放、沉浸和播放墙沿用现有原文件播放和交互。
+- `OriginalPlaybackTests.swift`、`OriginalVideoFrameTests.swift`、`Fixtures/original-playback-http.py`：HTTP Range 样本验证两张详情帧复用原文件票、保持 1920×1080；验证静音预览按采样位置读取原文件且不写观看记录，覆盖 MKV 的本机解码器路由。Debug/Release 各 51 通过、3 跳过；iPhone Release 编译、IPA 结构与哈希校验通过。
+
+真机待验收：打开一部 MP4 和一部 MKV 的详情，稍等后滚到预览条，确认前几张已加载；向右滑、点开放大，再退出重进验证命中缓存。在大图停留约 3 秒验证静音短片和离开后恢复封面，回归普通播放、沉浸、播放墙和小窗。Mac 测试覆盖了本机解码器路由；iPhone 的 VLC 实际取帧、冷缓存速度待真机确认。
+
+---
+
 # Peach iOS Test — 构建 23 验收
 
 安装包：[Peach-iOS-Test-unsigned.23.ipa](C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.23.ipa)，20,910,770 字节，无签名 iPhone ARM64，iOS 17.0+。SHA256 `7a52640fc08e05f4e80c953600e58d2ef06c1ec700602405ee443529d89b92b5`。源码 `1295a997a54de644859dac3e61129be533512b7c`；Codemagic `6aef7ac245a3d9dc5191530e`。校验和日志见 `artifacts/codemagic-23/`。

@@ -1,5 +1,12 @@
 # 当前继续点（2026-11-08）
 
+独立 App **构建 26** 已校验并放入 Downloads，待 iPhone 验收。详情提前缓存原图；大图静音片段和详情取帧都已切到原文件，由 iPhone 解码。普通播放、沉浸及播放墙继续读原文件。
+
+- IPA：C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.26.ipa；源码 `9736b8818d1b184d04769a60b1c0c32f14425407`，Codemagic `6aef8a454b804ab4e2e0ea3a`。校验和真机步骤见 ACCEPTANCE.md 首节。
+- 构建 23 的 IPA 保留回退；提前缓存阶段的源码备份为 `backups/local-preview-decode-20261108-041442/source.bundle`（`02bd7ee`）。
+
+## 构建 23 历史
+
 独立 App **构建 23** 已校验并放入 Downloads，待 iPhone 验收。普通播放横拖跨度减半，详情页预览条直接显示可见帧的原图，点开复用；播放墙、沉浸和小窗保持构建 22 的行为。
 
 - IPA：C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.23.ipa；源码 `1295a997a54de644859dac3e61129be533512b7c`，Codemagic `6aef7ac245a3d9dc5191530e`。校验和真机步骤见 ACCEPTANCE.md 首节。
