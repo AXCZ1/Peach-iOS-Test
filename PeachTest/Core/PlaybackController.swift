@@ -37,7 +37,6 @@ final class PlaybackController: ObservableObject {
     private var avOriginalURL: URL?
     private var didDisplayAVFrame = false
     private var firstFrameTask: Task<Void, Never>?
-    private var requestedPlannedStream = false
     private var previewHop: Task<Void, Never>?
     private var cachedPreview: CachedPreviewAsset?
 
@@ -113,28 +112,7 @@ final class PlaybackController: ObservableObject {
     private func prepareStream(for requestedSession: String) async {
         guard canInstallStream(for: requestedSession) else { return }
         do {
-            if !previewOnly {
-                try await prepareOriginal(for: requestedSession)
-                return
-            }
-            // Keep the existing short card preview separate from full playback.
-            requestedPlannedStream = true
-            let plan = try await api.streamPlan(id: item.id, sessionID: requestedSession)
-            guard canInstallStream(for: requestedSession) else { return }
-            let source = try api.playbackURL(plan: plan, id: item.id, sessionID: requestedSession)
-            let cookies = HTTPCookieStorage.shared.cookies(for: source) ?? []
-            var asset = AVURLAsset(url: source, options: ["AVURLAssetHTTPCookiesKey": cookies])
-            if plan.protocolName == "range", plan.mimeType == "video/mp4",
-               let cached = try? await PreviewRangeSource.open(origin: api.baseURL, identity: item.mediaCacheIdentity, fetch: { [api] range, version in
-                   try await api.previewBytes(from: source, range: range, validator: version)
-               }) {
-                guard canInstallStream(for: requestedSession) else { return }
-                let preview = CachedPreviewAsset(source: cached)
-                cachedPreview = preview
-                asset = preview.asset
-            }
-            guard canInstallStream(for: requestedSession) else { return }
-            install(asset, note: plan.protocolName == "hls" ? "HLS 自适应分片" : "原始 MP4 流")
+            try await prepareOriginal(for: requestedSession)
         } catch {
             guard requestedSession == sessionID, !stopped, !Task.isCancelled else { return }
             phase = .failed(error.localizedDescription)
@@ -144,10 +122,20 @@ final class PlaybackController: ObservableObject {
     private func prepareOriginal(for requestedSession: String) async throws {
         let source = try await api.originalPlaybackURL(id: item.id)
         guard canInstallStream(for: requestedSession) else { return }
-        if ["mp4", "m4v", "mov"].contains((item.name as NSString).pathExtension.lowercased()) {
-            let asset = AVURLAsset(url: source)
+        if item.canProbeOriginalWithAVFoundation {
+            var asset = AVURLAsset(url: source)
             do {
                 if try await Self.hasDecodableVideo(in: asset) {
+                    guard canInstallStream(for: requestedSession) else { return }
+                    if previewOnly, (item.name as NSString).pathExtension.lowercased() == "mp4",
+                       let cached = try? await PreviewRangeSource.open(origin: api.baseURL, identity: item.mediaCacheIdentity, fetch: { [api] range, version in
+                           try await api.previewBytes(from: source, range: range, validator: version)
+                       }) {
+                        guard canInstallStream(for: requestedSession) else { return }
+                        let preview = CachedPreviewAsset(source: cached)
+                        cachedPreview = preview
+                        asset = preview.asset
+                    }
                     guard canInstallStream(for: requestedSession) else { return }
                     install(asset, note: "原文件直放", originalURL: source)
                     return
@@ -197,6 +185,11 @@ final class PlaybackController: ObservableObject {
         }
         localPlayer = backend
         backend.setMuted(isMuted)
+        if previewOnly {
+            if duration > 0 { startPreviewHops() }
+            else { backend.setPlayback(true, rate: 1) }
+            return
+        }
         if let target = pendingResume, target > 5, duration <= 0 || target < duration - 10 {
             currentTime = target
             backend.seek(to: target) { _ in }
@@ -236,15 +229,15 @@ final class PlaybackController: ObservableObject {
             isScrubbing = false
             seekPreview = nil
             flushActivity()
-            // A pending plan must not survive a page switch. Its late result is
+            // A pending ticket must not survive a page switch. Its late result is
             // rejected by session identity, including a quick return to this page.
             if started, !hasVideoSurface, !stopped {
-                cancelPreparation()
                 sessionID = UUID().uuidString.replacingOccurrences(of: "-", with: "")
                 started = false
             }
         } else if previewOnly {
             startPreviewHops()
+            if duration <= 0 { localPlayer?.setPlayback(true, rate: 1) }
         } else {
             applyPlaybackIntent()
         }
@@ -303,7 +296,7 @@ final class PlaybackController: ObservableObject {
                       let reached else { return }
                 self.currentTime = reached
                 self.seeks += 1
-                PlayerMemory.shared.save(reached, for: self.item.id)
+                if !self.previewOnly { PlayerMemory.shared.save(reached, for: self.item.id) }
                 self.flushActivity()
             }
             return
@@ -402,15 +395,7 @@ final class PlaybackController: ObservableObject {
         localPlayer = nil
         avOriginalURL = nil
         cachedPreview?.cancel(); cachedPreview = nil
-        cancelPreparation()
         player = nil
-    }
-
-    private func cancelPreparation() {
-        if requestedPlannedStream {
-            api.cancelStream(sessionID: sessionID)
-            requestedPlannedStream = false
-        }
     }
 
     private func startTicker() {
@@ -471,10 +456,12 @@ final class PlaybackController: ObservableObject {
             if let position, !isScrubbing { currentTime = position }
             if length > 0, length != duration { duration = length }
             if hasFrame, phase == .preparing { phase = .ready }
+            if previewOnly { startPreviewHops() }
             updatePlaying(playing)
         case .ended:
             if intent.isActive { finishPlayback() }
         case let .failed(message):
+            stopPreviewHops()
             flushActivity(force: true)
             localPlayer?.onEvent = nil
             localPlayer?.stop()
@@ -617,11 +604,13 @@ final class PlaybackController: ObservableObject {
     }
 
     private func switchToLocalPlayer(source: URL, replacing player: AVPlayer) {
-        pendingResume = pendingResume ?? currentTime
+        if !previewOnly { pendingResume = pendingResume ?? currentTime }
+        stopPreviewHops()
         avOriginalURL = nil
         removeObservers()
         player.pause()
         player.replaceCurrentItem(with: nil)
+        cachedPreview?.cancel(); cachedPreview = nil
         self.player = nil
         isPlaying = false
         buffered = 0
@@ -646,20 +635,33 @@ final class PlaybackController: ObservableObject {
     }
 
     private func startPreviewHops() {
-        guard previewOnly, previewHop == nil, phase == .ready, intent.mayPlay, let player else { return }
+        guard previewOnly, previewHop == nil, intent.mayPlay, duration > 0 else { return }
+        if case .failed = phase { return }
+        let player = self.player
+        let localPlayer = self.localPlayer
+        guard (phase == .ready && player != nil) || localPlayer != nil else { return }
         let length = duration
+        let previewSession = sessionID
         previewHop = Task { [weak self] in
             var index = 0
             do {
                 while !Task.isCancelled {
                     let position = length * PreviewPlayback.positions[index]
-                    try await PreviewPlayback.playSample(on: player, at: position)
+                    if let player { try await PreviewPlayback.playSample(on: player, at: position) }
+                    else if let localPlayer {
+                        try await PreviewPlayback.playSample(on: localPlayer, at: position, duration: length)
+                    }
                     index = (index + 1) % PreviewPlayback.positions.count
                 }
             } catch {
-                guard let self, !Task.isCancelled, !self.stopped, self.player === player else { return }
-                player.pause()
-                self.phase = .failed(Self.describe(error))
+                guard let self, !Task.isCancelled, !self.stopped, self.sessionID == previewSession else { return }
+                if let player, let item = player.currentItem, let source = self.avOriginalURL,
+                   Self.isFormatFailure(error), !Self.hasHTTPFailure(item) {
+                    self.switchToLocalPlayer(source: source, replacing: player)
+                } else {
+                    self.pauseInstalledPlayer()
+                    self.phase = .failed(Self.describe(error))
+                }
             }
         }
     }

@@ -18,7 +18,7 @@ final class OriginalVideoFrameTests: XCTestCase {
         let first = try await PreviewRangeSource.open(origin: origin, identity: "fixture", cache: cache, fetch: fixture.fetch)
         let firstLoader = CachedPreviewAsset(source: first)
         defer { firstLoader.cancel() }
-        let frame = try await OriginalVideoFrame.capture(asset: firstLoader.asset, seconds: 0.1, hls: false)
+        let frame = try await OriginalVideoFrame.capture(asset: firstLoader.asset, seconds: 0.1)
         XCTAssertEqual(frame.width, 1280)
         XCTAssertEqual(frame.height, 720)
         let data = try OriginalVideoFrame.png(frame)
@@ -33,7 +33,7 @@ final class OriginalVideoFrameTests: XCTestCase {
         let second = try await PreviewRangeSource.open(origin: origin, identity: "fixture", cache: reopened, fetch: fixture.fetch)
         let secondLoader = CachedPreviewAsset(source: second)
         defer { secondLoader.cancel() }
-        let secondFrame = try await OriginalVideoFrame.capture(asset: secondLoader.asset, seconds: 0.1, hls: false)
+        let secondFrame = try await OriginalVideoFrame.capture(asset: secondLoader.asset, seconds: 0.1)
         XCTAssertEqual(secondFrame.width, 1280)
         let afterSecond = await fixture.payloadRequests
         XCTAssertEqual(afterSecond, afterFirst, "Reopening the same source should only issue the one-byte validation probe")

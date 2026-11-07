@@ -107,14 +107,6 @@ final class PeachAPI: @unchecked Sendable {
         return components.url ?? baseURL
     }
 
-    func playbackURL(plan: StreamPlan, id: Int, sessionID: String) throws -> URL {
-        guard let raw = plan.src, !raw.isEmpty else { return streamURL(id: id, sessionID: sessionID) }
-        guard let url = URL(string: raw, relativeTo: baseURL)?.absoluteURL, Self.sameOrigin(url, baseURL) else {
-            throw PeachAPIError(message: "播放地址与当前 Peach 服务不一致，请检查反代设置")
-        }
-        return url
-    }
-
     /// `/cover?code=…` is the official full sleeve. `thumb=2` asks Peach for
     /// the grid-sized derivative; `version` busts only that code's cache.
     func coverURL(code: String, thumb: Int = 2, version: String? = nil) -> URL? {
@@ -336,7 +328,7 @@ final class PeachAPI: @unchecked Sendable {
 
     // MARK: - Writes
 
-    /// Peach's external-player ticket gives AVPlayer the original Range stream.
+    /// Peach's external-player ticket gives the local decoders the original Range stream.
     func originalPlaybackURL(id: Int) async throws -> URL {
         struct Ticket: Decodable { let url: String }
         // A reverse proxy can give Peach a different origin from the App's address.
@@ -349,33 +341,6 @@ final class PeachAPI: @unchecked Sendable {
             throw PeachAPIError(message: "原文件播放地址与当前 Peach 服务不一致")
         }
         return source
-    }
-
-    func streamPlan(id: Int, sessionID: String) async throws -> StreamPlan {
-        try await get("/api/stream-plan", query: [
-            URLQueryItem(name: "id", value: String(id)),
-            URLQueryItem(name: "session", value: sessionID)
-        ])
-    }
-
-    func cancelStream(sessionID: String) {
-        guard !sessionID.isEmpty else { return }
-        var request = URLRequest(url: url(path: "/api/stream-cancel", query: [
-            URLQueryItem(name: "session", value: sessionID)
-        ]))
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        request.httpBody = Data()
-        request.setValue(baseURL.absoluteString, forHTTPHeaderField: "Origin")
-        session.dataTask(with: request).resume()
-    }
-
-    func streamURL(id: Int, sessionID: String) -> URL {
-        url(path: "/stream", query: [
-            URLQueryItem(name: "id", value: String(id)),
-            URLQueryItem(name: "session", value: sessionID)
-        ])
     }
 
     #if canImport(AVFoundation)

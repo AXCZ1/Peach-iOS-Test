@@ -35,7 +35,7 @@ final class OriginalPlaybackTests: XCTestCase {
         let local = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).mp4")
         try FileManager.default.moveItem(at: download, to: local)
         defer { try? FileManager.default.removeItem(at: local) }
-        let frame = try await OriginalVideoFrame.capture(asset: AVURLAsset(url: local), seconds: 8, hls: false)
+        let frame = try await OriginalVideoFrame.capture(asset: AVURLAsset(url: local), seconds: 8)
         XCTAssertEqual(frame.width, 1920)
         XCTAssertEqual(frame.height, 1080)
     }
@@ -204,17 +204,73 @@ final class OriginalPlaybackTests: XCTestCase {
         XCTAssertNil(counts["plans"])
     }
 
-    func testCardPreviewKeepsItsExistingStreamPlanAndNeverMarksPlayed() async throws {
+    func testCardPreviewPlaysOriginalSamplesWithoutMarkingPlayed() async throws {
         let fixture = try OriginalPlaybackFixture()
         defer { fixture.stop() }
         let controller = try fixture.controller(previewOnly: true)
         defer { controller.stop() }
         await controller.activate()
-        XCTAssertNotNil(controller.player)
+        let player = try XCTUnwrap(controller.player)
+        try await waitFor("original card preview") {
+            controller.isPlaying && player.currentTime().seconds >= controller.duration * 0.08
+        }
         XCTAssertNil(controller.localPlayer)
+        XCTAssertTrue(player.isMuted)
+        controller.stop()
         let counts = try await fixture.counts()
-        XCTAssertEqual(counts["plans"], 1)
-        XCTAssertNil(counts["tickets"])
+        XCTAssertEqual(counts["tickets"], 1)
+        XCTAssertGreaterThan(counts["original_ranges", default: 0], 0)
+        XCTAssertNil(counts["plans"])
+        XCTAssertNil(counts["play_marks"])
+        XCTAssertNil(counts["activities"])
+        XCTAssertNil(PlayerMemory.shared.position(for: controller.item.id))
+    }
+
+    func testMKVCardPreviewSeeksThroughLocalDecoderWithoutWatchRecords() async throws {
+        let fixture = try OriginalPlaybackFixture()
+        defer { fixture.stop() }
+        let local = RecordingLocalPlayer()
+        var url: URL?
+        let controller = try fixture.controller(name: "fixture.mkv", previewOnly: true, makeLocalPlayer: {
+            url = $0
+            return local
+        })
+        defer { controller.stop() }
+        await controller.activate()
+        try await waitFor("first local preview seek") { local.seekTarget != nil }
+        XCTAssertEqual(url?.path, "/external-stream/42001")
+        let first = try XCTUnwrap(local.seekTarget)
+        XCTAssertEqual(first, 24 * 0.08, accuracy: 0.01)
+        XCTAssertTrue(local.muted)
+        XCTAssertTrue(local.playing)
+        local.completeSeek(at: first)
+        local.showFrame(at: first + 1.5)
+        try await waitFor("second local preview seek") { local.seekTarget != first }
+        XCTAssertEqual(local.seekTarget ?? 0, 24 * 0.22, accuracy: 0.01)
+        controller.stop()
+        let counts = try await fixture.counts()
+        XCTAssertEqual(counts["tickets"], 1)
+        XCTAssertNil(counts["plans"])
+        XCTAssertNil(counts["play_marks"])
+        XCTAssertNil(counts["activities"])
+        XCTAssertNil(PlayerMemory.shared.position(for: controller.item.id))
+    }
+
+    func testDetailFramesShareSignedOriginalAndRetainSourceResolution() async throws {
+        let fixture = try OriginalPlaybackFixture()
+        defer { fixture.stop() }
+        let api = PeachAPI(baseURL: fixture.baseURL)
+        let item = try JSONDecoder().decode(PeachItem.self, from: Data(#"{"id":42001,"name":"fixture.mp4"}"#.utf8))
+        let reader = try await OriginalFrameReader(api: api, item: item)
+        for seconds in [2.0, 8.0] {
+            let frame = try await reader.capture(at: seconds)
+            XCTAssertEqual(frame.width, 1920)
+            XCTAssertEqual(frame.height, 1080)
+        }
+        let counts = try await fixture.counts()
+        XCTAssertEqual(counts["tickets"], 1)
+        XCTAssertGreaterThan(counts["original_ranges", default: 0], 0)
+        XCTAssertNil(counts["plans"])
         XCTAssertNil(counts["play_marks"])
     }
 

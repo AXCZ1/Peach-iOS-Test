@@ -28,7 +28,7 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
 
     private static let retirementQueue = DispatchQueue(label: "Peach.VLC.retirement", qos: .utility)
     private static let logSink = VLCPrivateLogSink()
-    private static let installLogSink: Void = {
+    fileprivate static let installLogSink: Void = {
         VLCLibrary.shared().loggers = [logSink]
     }()
 
@@ -208,6 +208,95 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
     private func fail(_ message: String) {
         stop()
         onEvent?(.failed(message))
+    }
+}
+
+@MainActor
+final class VLCOriginalFrameDecoder: NSObject, VLCMediaThumbnailerDelegate {
+    private let media: VLCMedia
+    private var size: CGSize?
+    private var thumbnailer: VLCMediaThumbnailer?
+    private var continuation: CheckedContinuation<CGImage, Error>?
+
+    init(url: URL, width: Int?, height: Int?) {
+        _ = VLCOriginalPlayer.installLogSink
+        media = VLCMedia(url: url)
+        if let width, let height, width > 0, height > 0 {
+            size = CGSize(width: width, height: height)
+        }
+        super.init()
+    }
+
+    func capture(at seconds: Double) async throws -> CGImage {
+        guard seconds.isFinite, seconds >= 0, seconds * 1_000 <= Double(Int32.max) else {
+            throw PeachAPIError(message: "预览图时间无效")
+        }
+        let size = try await originalSize()
+        try Task.checkCancellation()
+        let thumbnailer = VLCMediaThumbnailer(media: media, andDelegate: self)
+        thumbnailer.thumbnailWidth = size.width
+        thumbnailer.thumbnailHeight = size.height
+        thumbnailer.snapshotTime = VLCTime(int: Int32((seconds * 1_000).rounded()))
+        thumbnailer.preciseSeek = true
+        thumbnailer.hardwareDecodingEnabled = true
+        let id = ObjectIdentifier(thumbnailer)
+        let timeout = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(24)) } catch { return }
+            self?.finish(id, result: .failure(PeachAPIError(message: "等待原画帧超时")), cancel: true)
+        }
+        defer { timeout.cancel() }
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                self.thumbnailer = thumbnailer
+                self.continuation = continuation
+                thumbnailer.fetchThumbnail()
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.finish(id, result: .failure(CancellationError()), cancel: true)
+            }
+        }
+    }
+
+    private func originalSize() async throws -> CGSize {
+        if let size { return size }
+        let parser = VLCMediaParser(library: VLCLibrary.shared(), timeout: 8_000)
+        guard parser.queueMedia(media, options: VLCMediaParsingOptions(rawValue: 1)) == 0 else {
+            throw PeachAPIError(message: "无法读取原文件的分辨率")
+        }
+        defer { parser.cancelAllParsing() }
+        let deadline = ContinuousClock.now + .seconds(9)
+        while media.parsedStatus == .none || media.parsedStatus == .pending {
+            guard ContinuousClock.now < deadline else { throw PeachAPIError(message: "读取原文件分辨率超时") }
+            try await Task.sleep(for: .milliseconds(80))
+        }
+        guard let video = media.videoTracks.compactMap(\.video).first, video.width > 0, video.height > 0 else {
+            throw PeachAPIError(message: "无法读取原文件的分辨率")
+        }
+        let dimensions = CGSize(width: Int(video.width), height: Int(video.height))
+        size = dimensions
+        return dimensions
+    }
+
+    nonisolated func mediaThumbnailerDidTimeOut(_ mediaThumbnailer: VLCMediaThumbnailer) {
+        let id = ObjectIdentifier(mediaThumbnailer)
+        Task { @MainActor [weak self] in
+            self?.finish(id, result: .failure(PeachAPIError(message: "iPhone 无法从原文件取帧")))
+        }
+    }
+
+    nonisolated func mediaThumbnailer(_ mediaThumbnailer: VLCMediaThumbnailer, didFinishThumbnail thumbnail: CGImage) {
+        let id = ObjectIdentifier(mediaThumbnailer)
+        Task { @MainActor [weak self] in self?.finish(id, result: .success(thumbnail)) }
+    }
+
+    private func finish(_ id: ObjectIdentifier, result: Result<CGImage, Error>, cancel: Bool = false) {
+        guard let thumbnailer, ObjectIdentifier(thumbnailer) == id else { return }
+        if cancel { thumbnailer.cancel() }
+        self.thumbnailer = nil
+        let pending = continuation
+        continuation = nil
+        pending?.resume(with: result)
     }
 }
 

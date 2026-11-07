@@ -16,7 +16,10 @@ struct DwellVideoPreview: View {
     }
     var body: some View {
         ZStack {
-            if let player = controller.player, controller.phase == .ready {
+            if let player = controller.localPlayer as? VLCOriginalPlayer {
+                DwellLocalVideoSurface(surface: player.view)
+                    .opacity(controller.phase == .ready && startedPlaying ? 1 : 0)
+            } else if let player = controller.player, controller.phase == .ready {
                 DwellVideoSurface(player: player, hasFrame: $hasFrame)
                     .background(.black)
                     .opacity(hasFrame && startedPlaying ? 1 : 0)
@@ -27,8 +30,17 @@ struct DwellVideoPreview: View {
         .onChange(of: controller.isPlaying, initial: true) { _, playing in
             if playing { startedPlaying = true }
         }
+        .onChange(of: hasFrame) { _, ready in
+            if ready, let player = controller.player { controller.noteDisplayedFrame(for: player) }
+        }
         .onDisappear { controller.stop() }
     }
+}
+
+private struct DwellLocalVideoSurface: UIViewRepresentable {
+    let surface: UIView
+    func makeUIView(context: Context) -> UIView { surface }
+    func updateUIView(_ view: UIView, context: Context) {}
 }
 
 private struct DwellVideoSurface: UIViewRepresentable {
@@ -216,7 +228,7 @@ struct PreviewFilmstrip: View {
         .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
     }
     private func request(at seconds: Double) -> FrameRequest {
-        let key = MediaCacheKey(url: api.baseURL, kind: .originalFrame, resource: "\(item.mediaCacheIdentity):\(seconds)")
+        let key = MediaCacheKey(url: api.baseURL, kind: .originalFrame, resource: "direct:\(item.mediaCacheIdentity):\(seconds)")
         return FrameRequest(seconds: seconds, key: key)
     }
 
@@ -242,20 +254,13 @@ struct PreviewFilmstrip: View {
         }
         guard !misses.isEmpty, !Task.isCancelled else { return }
 
-        let session = UUID().uuidString
-        defer { api.cancelStream(sessionID: session) }
         do {
-            let plan = try await api.streamPlan(id: item.id, sessionID: session)
-            try Task.checkCancellation()
-            let url = try api.playbackURL(plan: plan, id: item.id, sessionID: session)
-            let cookies = HTTPCookieStorage.shared.cookies(for: url) ?? []
-            let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPCookiesKey": cookies])
+            let reader = try await OriginalFrameReader(api: api, item: item)
             await withTaskGroup(of: Void.self) { writes in
                 var writing = false
                 for request in misses {
                     do {
-                        let frame = try await OriginalVideoFrame.capture(asset: asset, seconds: request.seconds,
-                                                                         hls: plan.protocolName == "hls")
+                        let frame = try await reader.capture(at: request.seconds)
                         try Task.checkCancellation()
                         frames[request.key] = .image(UIImage(cgImage: frame))
                         // Encode at most one PNG while the next frame is being decoded.

@@ -405,20 +405,6 @@ struct PeachIndexResponse: Decodable, Sendable {
     }
 }
 
-struct StreamPlan: Decodable, Sendable {
-    let id: Int
-    let protocolName: String
-    let mimeType: String?
-    let duration: Double?
-    let src: String?
-
-    enum CodingKeys: String, CodingKey {
-        case id, duration, src
-        case protocolName = "protocol"
-        case mimeType = "mime_type"
-    }
-}
-
 struct PeachErrorResponse: Decodable, Sendable {
     let error: String?
 }

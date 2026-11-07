@@ -50,6 +50,8 @@ class Fixture(BaseHTTPRequestHandler):
             return self.json({"url": f"/external-stream/{asset}?ticket=fixture", "expires_in": 21600})
         if route.path == "/api/play":
             self.count("play_marks")
+        if route.path == "/api/activity":
+            self.count("activities")
         self.json({"ok": True, "play_count": 1})
 
     def do_HEAD(self):
