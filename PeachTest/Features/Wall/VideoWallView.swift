@@ -36,7 +36,7 @@ struct VideoWallView: View {
                             WallArtwork(item: item, api: api, image: preferences.wallImage, ratio: tile.rect.width / tile.rect.height)
                             if selectedKey == tile.id {
                                 if let playback {
-                                    WallFocusView(session: playback, onClose: clearSelection,
+                                    WallFocusView(session: playback, showsVideo: fullPlayer == nil, onClose: clearSelection,
                                                   onFullScreen: { fullPlayer = playback })
                                 } else {
                                     focusActions(item)

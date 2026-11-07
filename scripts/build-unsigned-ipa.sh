@@ -13,9 +13,10 @@ fi
 # not boot a simulator or run UI automation.
 swift test --package-path "$PWD" 2>&1 | tee build/swift-test.log
 swift test --package-path "$PWD" --configuration release 2>&1 | tee build/swift-test-release.log
+pod install --deployment 2>&1 | tee build/pod-install.log
 
 xcodebuild \
-  -project PeachTest.xcodeproj -scheme PeachTest -configuration Release \
+  -workspace PeachTest.xcworkspace -scheme PeachTest -configuration Release \
   -sdk iphoneos -destination 'generic/platform=iOS' \
   -derivedDataPath build/DerivedData \
   ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \

@@ -1,3 +1,6 @@
+#include? "Pods/Target Support Files/Pods-PeachTest/Pods-PeachTest.debug.xcconfig"
+#include? "Pods/Target Support Files/Pods-PeachTest/Pods-PeachTest.release.xcconfig"
+
 PRODUCT_BUNDLE_IDENTIFIER = com.axcz1.peachios.test
 PRODUCT_NAME = PeachTest
 MARKETING_VERSION = 1.0.0
@@ -12,3 +15,4 @@ ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor
 ENABLE_USER_SCRIPT_SANDBOXING = NO
 CLANG_ENABLE_MODULES = YES
 SWIFT_STRICT_CONCURRENCY = complete
+LD_RUNPATH_SEARCH_PATHS = $(inherited) @executable_path/Frameworks

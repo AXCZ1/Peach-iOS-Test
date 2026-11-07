@@ -19,6 +19,7 @@ final class PlaybackController: ObservableObject {
 
     @Published private(set) var phase: Phase = .preparing
     @Published private(set) var player: AVPlayer?
+    @Published private(set) var localPlayer: (any LocalOriginalPlayer)?
     @Published private(set) var isPlaying = false
     @Published private(set) var currentTime = 0.0
     @Published private(set) var duration = 0.0
@@ -29,12 +30,14 @@ final class PlaybackController: ObservableObject {
     @Published private(set) var seekPreview: Double? = nil
     @Published private(set) var isBoosting = false
     @Published private(set) var isPiPActive = false
+    var hasVideoSurface: Bool { player != nil || localPlayer != nil }
     private var foregroundActive = false
     private let previewOnly: Bool
-    private let prefersOriginal: Bool
-    private var originalUnavailable = false
+    private let makeLocalPlayer: @MainActor (URL) -> (any LocalOriginalPlayer)?
+    private var avOriginalURL: URL?
+    private var didDisplayAVFrame = false
+    private var firstFrameTask: Task<Void, Never>?
     private var requestedPlannedStream = false
-    private var fallbackTask: Task<Void, Never>?
     private var previewHop: Task<Void, Never>?
     private var cachedPreview: CachedPreviewAsset?
 
@@ -63,11 +66,20 @@ final class PlaybackController: ObservableObject {
     private var failedToEndObserver: NSObjectProtocol?
     private var didEnd = false
 
-    init(api: PeachAPI, item: PeachItem, previewOnly: Bool = false, preferOriginal: Bool = false) {
+    init(api: PeachAPI, item: PeachItem, previewOnly: Bool = false,
+         makeLocalPlayer: (@MainActor (URL) -> (any LocalOriginalPlayer)?)? = nil) {
         self.previewOnly = previewOnly
-        self.prefersOriginal = preferOriginal && ["mp4", "m4v", "mov"].contains((item.name as NSString).pathExtension.lowercased())
         self.api = api
         self.item = item
+        self.makeLocalPlayer = makeLocalPlayer ?? Self.defaultLocalPlayer
+    }
+
+    private static func defaultLocalPlayer(_ url: URL) -> (any LocalOriginalPlayer)? {
+        #if os(iOS) && !SWIFT_PACKAGE
+        VLCOriginalPlayer(url: url)
+        #else
+        nil
+        #endif
     }
 
     private func start() async {
@@ -89,11 +101,7 @@ final class PlaybackController: ObservableObject {
         started = true
         phase = .preparing
         if !previewOnly {
-            if let local = PlayerMemory.shared.position(for: item.id) {
-                pendingResume = local
-            } else if item.resumeTime > 0 {
-                pendingResume = item.resumeTime
-            }
+            pendingResume = PlayerMemory.shared.position(for: item.id) ?? item.resumeTime
         }
         await prepareStream(for: sessionID)
     }
@@ -105,29 +113,18 @@ final class PlaybackController: ObservableObject {
     private func prepareStream(for requestedSession: String) async {
         guard canInstallStream(for: requestedSession) else { return }
         do {
-            if prefersOriginal, !originalUnavailable {
-                do {
-                    let source = try await api.originalPlaybackURL(id: item.id)
-                    guard canInstallStream(for: requestedSession) else { return }
-                    let asset = AVURLAsset(url: source)
-                    if try await Self.hasDecodableVideo(in: asset) {
-                        guard canInstallStream(for: requestedSession) else { return }
-                        install(asset, note: "原文件直放", original: true)
-                        return
-                    }
-                } catch where Self.canUseCompatibility(after: error) {
-                    // The endpoint or the device's decoder does not support this original.
-                }
-                guard canInstallStream(for: requestedSession) else { return }
-                originalUnavailable = true
+            if !previewOnly {
+                try await prepareOriginal(for: requestedSession)
+                return
             }
+            // Keep the existing short card preview separate from full playback.
             requestedPlannedStream = true
             let plan = try await api.streamPlan(id: item.id, sessionID: requestedSession)
             guard canInstallStream(for: requestedSession) else { return }
             let source = try api.playbackURL(plan: plan, id: item.id, sessionID: requestedSession)
             let cookies = HTTPCookieStorage.shared.cookies(for: source) ?? []
             var asset = AVURLAsset(url: source, options: ["AVURLAssetHTTPCookiesKey": cookies])
-            if previewOnly, plan.protocolName == "range", plan.mimeType == "video/mp4",
+            if plan.protocolName == "range", plan.mimeType == "video/mp4",
                let cached = try? await PreviewRangeSource.open(origin: api.baseURL, identity: item.mediaCacheIdentity, fetch: { [api] range, version in
                    try await api.previewBytes(from: source, range: range, validator: version)
                }) {
@@ -144,6 +141,25 @@ final class PlaybackController: ObservableObject {
         }
     }
 
+    private func prepareOriginal(for requestedSession: String) async throws {
+        let source = try await api.originalPlaybackURL(id: item.id)
+        guard canInstallStream(for: requestedSession) else { return }
+        if ["mp4", "m4v", "mov"].contains((item.name as NSString).pathExtension.lowercased()) {
+            let asset = AVURLAsset(url: source)
+            do {
+                if try await Self.hasDecodableVideo(in: asset) {
+                    guard canInstallStream(for: requestedSession) else { return }
+                    install(asset, note: "原文件直放", originalURL: source)
+                    return
+                }
+            } catch where Self.isFormatFailure(error) {
+                // Use the same original stream with the other decoder.
+            }
+        }
+        guard canInstallStream(for: requestedSession) else { return }
+        installLocalPlayer(for: source)
+    }
+
     private static func hasDecodableVideo(in asset: AVURLAsset) async throws -> Bool {
         // An asset can be playable with just its audio even if no video track can be decoded.
         for track in try await asset.loadTracks(withMediaType: .video) {
@@ -152,22 +168,41 @@ final class PlaybackController: ObservableObject {
         return false
     }
 
-    private static func canUseCompatibility(after error: Error) -> Bool {
-        let status = (error as? PeachAPIError)?.status
-        return status == 404 || status == 405 || isFormatFailure(error)
-    }
-
-    private func install(_ asset: AVURLAsset, note: String, original: Bool = false) {
+    private func install(_ asset: AVURLAsset, note: String, originalURL: URL? = nil) {
         let playerItem = AVPlayerItem(asset: asset)
-        if !original { playerItem.preferredForwardBufferDuration = previewOnly ? 2 : 8 }
+        if previewOnly { playerItem.preferredForwardBufferDuration = 2 }
         let player = AVPlayer(playerItem: playerItem)
         player.automaticallyWaitsToMinimizeStalling = !previewOnly
         player.allowsExternalPlayback = true
         formatNote = note
+        avOriginalURL = originalURL
+        didDisplayAVFrame = false
         self.player = player
-        observe(player, item: playerItem, original: original)
+        observe(player, item: playerItem, original: originalURL != nil)
         player.isMuted = isMuted
         if !previewOnly { applyPlaybackIntent() }
+        startTicker()
+    }
+
+    private func installLocalPlayer(for source: URL) {
+        guard let backend = makeLocalPlayer(source) else {
+            phase = .failed("此设备没有可解码这个原文件的播放器。")
+            return
+        }
+        duration = item.duration ?? duration
+        formatNote = "原文件直放 · VLC"
+        backend.onEvent = { [weak self, weak backend] event in
+            guard let self, let backend, self.localPlayer === backend, !self.stopped else { return }
+            self.handleLocalEvent(event)
+        }
+        localPlayer = backend
+        backend.setMuted(isMuted)
+        if let target = pendingResume, target > 5, duration <= 0 || target < duration - 10 {
+            currentTime = target
+            backend.seek(to: target) { _ in }
+        }
+        pendingResume = nil
+        applyPlaybackIntent()
         startTicker()
     }
 
@@ -195,7 +230,7 @@ final class PlaybackController: ObservableObject {
         if !active {
             endBoost()
             stopPreviewHops()
-            player?.pause()
+            pauseInstalledPlayer()
             isPlaying = false
             intent.scrubbing = false
             isScrubbing = false
@@ -203,7 +238,7 @@ final class PlaybackController: ObservableObject {
             flushActivity()
             // A pending plan must not survive a page switch. Its late result is
             // rejected by session identity, including a quick return to this page.
-            if started, player == nil, !stopped {
+            if started, !hasVideoSurface, !stopped {
                 cancelPreparation()
                 sessionID = UUID().uuidString.replacingOccurrences(of: "-", with: "")
                 started = false
@@ -236,20 +271,44 @@ final class PlaybackController: ObservableObject {
     private func applyPlaybackIntent() {
         if intent.mayPlay, !stopped {
             lastTick = Date()
-            player?.defaultRate = isBoosting ? 2 : 1
-            player?.play()
+            let rate: Float = isBoosting ? 2 : 1
+            if let localPlayer {
+                localPlayer.setPlayback(true, rate: rate)
+            } else {
+                player?.defaultRate = rate
+                player?.play()
+                watchForFirstFrame()
+            }
         } else {
-            player?.pause()
+            pauseInstalledPlayer()
         }
     }
 
+    private func pauseInstalledPlayer() {
+        player?.pause()
+        localPlayer?.setPlayback(false, rate: 1)
+        firstFrameTask?.cancel()
+        firstFrameTask = nil
+    }
+
     func seek(to time: Double) {
-        guard let player else { return }
+        guard hasVideoSurface else { return }
         seekPreview = nil
         let clamped = max(0, min(time, duration > 0 ? duration : time))
-        player.seek(to: CMTime(seconds: clamped, preferredTimescale: 600),
-                    toleranceBefore: .zero, toleranceAfter: .zero)
         currentTime = clamped
+        if let localPlayer {
+            localPlayer.seek(to: clamped) { [weak self, weak localPlayer] reached in
+                guard let self, let localPlayer, self.localPlayer === localPlayer, !self.stopped,
+                      let reached else { return }
+                self.currentTime = reached
+                self.seeks += 1
+                PlayerMemory.shared.save(reached, for: self.item.id)
+                self.flushActivity()
+            }
+            return
+        }
+        player?.seek(to: CMTime(seconds: clamped, preferredTimescale: 600),
+                     toleranceBefore: .zero, toleranceAfter: .zero)
         seeks += 1
         if !previewOnly { PlayerMemory.shared.save(clamped, for: item.id) }
         flushActivity()
@@ -265,7 +324,7 @@ final class PlaybackController: ObservableObject {
     }
 
     func beginBoost() {
-        guard intent.mayPlay, !stopped, player != nil else { return }
+        guard intent.mayPlay, !stopped, hasVideoSurface else { return }
         isBoosting = true
         applyPlaybackIntent()
     }
@@ -273,6 +332,10 @@ final class PlaybackController: ObservableObject {
     func endBoost() {
         guard isBoosting else { return }
         isBoosting = false
+        if let localPlayer {
+            localPlayer.setPlayback(intent.mayPlay && !stopped, rate: 1)
+            return
+        }
         player?.defaultRate = 1
         if intent.mayPlay, !stopped { player?.rate = 1 }
     }
@@ -281,7 +344,7 @@ final class PlaybackController: ObservableObject {
         endBoost()
         isScrubbing = true
         intent.scrubbing = true
-        player?.pause()
+        pauseInstalledPlayer()
     }
 
     /// Horizontal drag preview: show where a release would land without
@@ -311,6 +374,7 @@ final class PlaybackController: ObservableObject {
     func setMuted(_ muted: Bool) {
         isMuted = muted
         player?.isMuted = muted
+        localPlayer?.setMuted(muted)
     }
 
     func stop() {
@@ -318,8 +382,7 @@ final class PlaybackController: ObservableObject {
         endBoost()
         isPiPActive = false
         stopPreviewHops()
-        if !previewOnly, let player, !didEnd {
-            let position = player.currentTime().seconds
+        if !previewOnly, let position = reportingPosition, !didEnd {
             if position.isFinite, position > 1 { PlayerMemory.shared.save(position, for: item.id) }
         }
         flushActivity(force: true)
@@ -332,14 +395,16 @@ final class PlaybackController: ObservableObject {
         removeObservers()
         player?.pause()
         player?.replaceCurrentItem(with: nil)
+        localPlayer?.onEvent = nil
+        localPlayer?.stop()
+        localPlayer = nil
+        avOriginalURL = nil
         cachedPreview?.cancel(); cachedPreview = nil
         cancelPreparation()
         player = nil
     }
 
     private func cancelPreparation() {
-        fallbackTask?.cancel()
-        fallbackTask = nil
         if requestedPlannedStream {
             api.cancelStream(sessionID: sessionID)
             requestedPlannedStream = false
@@ -358,8 +423,8 @@ final class PlaybackController: ObservableObject {
     }
 
     private func tick() {
-        guard !previewOnly, !stopped, let player else { return }
-        let playing = intent.mayPlay && player.timeControlStatus == .playing
+        guard !previewOnly, !stopped, hasVideoSurface else { return }
+        let playing = intent.mayPlay && (player.map { $0.timeControlStatus == .playing } ?? isPlaying)
         if playing {
             let now = Date()
             if let lastTick {
@@ -376,9 +441,8 @@ final class PlaybackController: ObservableObject {
     }
 
     private func flushActivity(force: Bool = false, ended: Bool = false) {
-        guard !previewOnly, let player else { return }
+        guard !previewOnly, let position = reportingPosition else { return }
         guard !stopped || force else { return }
-        let position = player.currentTime().seconds
         let total = duration > 0 ? duration : (item.duration ?? 0)
         let delta = watchSeconds
         let seekCount = seeks
@@ -392,6 +456,47 @@ final class PlaybackController: ObservableObject {
                                     delta: delta, ended: ended, seeks: seekCount)
         }
         if !ended { PlayerMemory.shared.save(position, for: item.id) }
+    }
+
+    private var reportingPosition: Double? {
+        if let localPlayer { return localPlayer.reportingPosition }
+        return player?.currentTime().seconds
+    }
+
+    private func handleLocalEvent(_ event: LocalPlaybackEvent) {
+        switch event {
+        case let .sample(position, length, playing, hasFrame):
+            if let position, !isScrubbing { currentTime = position }
+            if length > 0, length != duration { duration = length }
+            if hasFrame, phase == .preparing { phase = .ready }
+            updatePlaying(playing)
+        case .ended:
+            if intent.isActive { finishPlayback() }
+        case let .failed(message):
+            flushActivity(force: true)
+            localPlayer?.onEvent = nil
+            localPlayer?.stop()
+            localPlayer = nil
+            ticker?.cancel()
+            ticker = nil
+            isPlaying = false
+            phase = .failed(message)
+        }
+    }
+
+    private func updatePlaying(_ playing: Bool) {
+        let activePlayback = playing && intent.mayPlay
+        if isPlaying != activePlayback { isPlaying = activePlayback }
+        if !previewOnly, intent.consumePlayMark(isPlaying: playing) {
+            Task { try? await self.api.markPlayed(id: self.item.id) }
+        }
+    }
+
+    private func finishPlayback() {
+        didEnd = true
+        if !previewOnly { PlayerMemory.shared.clear(item.id) }
+        flushActivity(force: true, ended: true)
+        onEnded?()
     }
 
     private func observe(_ player: AVPlayer, item playerItem: AVPlayerItem, original: Bool) {
@@ -423,10 +528,8 @@ final class PlaybackController: ObservableObject {
                 guard let self, !self.stopped, self.player === player else { return }
                 let playing = player.timeControlStatus == .playing
                 if playing, !self.intent.mayPlay { player.pause() }
-                self.isPlaying = playing && self.intent.mayPlay
-                if !self.previewOnly, self.intent.consumePlayMark(isPlaying: playing) {
-                    Task { try? await self.api.markPlayed(id: self.item.id) }
-                }
+                self.updatePlaying(playing)
+                self.watchForFirstFrame()
             }
         }
         playbackLikelyToKeepUp = playerItem.observe(\.isPlaybackLikelyToKeepUp, options: [.new]) { [weak self] item, _ in
@@ -454,10 +557,7 @@ final class PlaybackController: ObservableObject {
         endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: playerItem, queue: .main) { [weak self] _ in
             Task { @MainActor in
                 guard let self, !self.stopped, self.player === player, self.intent.isActive else { return }
-                self.didEnd = true
-                if !self.previewOnly { PlayerMemory.shared.clear(self.item.id) }
-                self.flushActivity(force: true, ended: true)
-                self.onEnded?()
+                self.finishPlayback()
             }
         }
         if original {
@@ -477,14 +577,46 @@ final class PlaybackController: ObservableObject {
     }
 
     private func handleFailure(_ error: Error?, player: AVPlayer, item: AVPlayerItem, original: Bool) {
-        // Transport/auth failures should not start an expensive transcode.
-        guard original, Self.isFormatFailure(error),
-              item.errorLog()?.events.contains(where: { (400...599).contains($0.errorStatusCode) }) != true else {
+        guard original, let source = avOriginalURL, Self.isFormatFailure(error), !Self.hasHTTPFailure(item) else {
             phase = .failed(Self.describe(error))
             return
         }
-        originalUnavailable = true
+        switchToLocalPlayer(source: source, replacing: player)
+    }
+
+    func noteDisplayedFrame(for player: AVPlayer) {
+        guard self.player === player else { return }
+        didDisplayAVFrame = true
+        watchForFirstFrame()
+    }
+
+    private func watchForFirstFrame() {
+        guard let player, let source = avOriginalURL, !didDisplayAVFrame,
+              !stopped, intent.mayPlay, !isPiPActive, player.timeControlStatus == .playing else {
+            firstFrameTask?.cancel()
+            firstFrameTask = nil
+            return
+        }
+        guard firstFrameTask == nil else { return }
+        firstFrameTask = Task { [weak self, weak player] in
+            do { try await Task.sleep(for: .seconds(6)) } catch { return }
+            guard let self, let player, self.player === player else { return }
+            self.firstFrameTask = nil
+            // A decoder can play the audio track without ever displaying video.
+            guard !self.didDisplayAVFrame, !self.stopped, self.intent.mayPlay,
+                  !self.isPiPActive, player.timeControlStatus == .playing,
+                  let item = player.currentItem, !Self.hasHTTPFailure(item) else { return }
+            self.switchToLocalPlayer(source: source, replacing: player)
+        }
+    }
+
+    private static func hasHTTPFailure(_ item: AVPlayerItem) -> Bool {
+        item.errorLog()?.events.contains(where: { (400...599).contains($0.errorStatusCode) }) == true
+    }
+
+    private func switchToLocalPlayer(source: URL, replacing player: AVPlayer) {
         pendingResume = pendingResume ?? currentTime
+        avOriginalURL = nil
         removeObservers()
         player.pause()
         player.replaceCurrentItem(with: nil)
@@ -493,12 +625,7 @@ final class PlaybackController: ObservableObject {
         buffered = 0
         lastTick = nil
         phase = .preparing
-        if intent.isActive {
-            let requestedSession = sessionID
-            fallbackTask = Task { [weak self] in await self?.prepareStream(for: requestedSession) }
-        } else {
-            started = false
-        }
+        installLocalPlayer(for: source)
     }
 
     private static func isFormatFailure(_ error: Error?) -> Bool {
@@ -561,6 +688,8 @@ final class PlaybackController: ObservableObject {
         itemError = nil
         stallTask?.cancel()
         stallTask = nil
+        firstFrameTask?.cancel()
+        firstFrameTask = nil
         ticker?.cancel()
         ticker = nil
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }

@@ -3,16 +3,18 @@ import SwiftUI
 struct WallFocusView: View {
     @ObservedObject var session: PlayerPresentation
     @ObservedObject private var controller: PlaybackController
+    let showsVideo: Bool
     let onClose: () -> Void
     let onFullScreen: () -> Void
-    init(session: PlayerPresentation, onClose: @escaping () -> Void, onFullScreen: @escaping () -> Void) {
+    init(session: PlayerPresentation, showsVideo: Bool, onClose: @escaping () -> Void, onFullScreen: @escaping () -> Void) {
         self.session = session; self.controller = session.controller
+        self.showsVideo = showsVideo
         self.onClose = onClose; self.onFullScreen = onFullScreen
     }
     var body: some View {
         ZStack {
             Color.black
-            if let player = controller.player { VideoSurface(player: player) }
+            if showsVideo, controller.hasVideoSurface { SessionVideoSurface(session: session) }
             MediaGestureOverlay(onTap: { controller.togglePlayback() },
                 onDoubleTap: { _ = controller.doubleTap(at: Double($0)) },
                 onSeekChanged: { _ in }, onSeekEnded: { _ in }, allowsHorizontalSeek: false,

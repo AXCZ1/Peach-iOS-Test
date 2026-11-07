@@ -33,7 +33,7 @@ struct PlayerView: View {
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            if model.player != nil {
+            if model.hasVideoSurface {
                 SessionVideoSurface(session: session).ignoresSafeArea()
                 MediaGestureOverlay(
                     onTap: { withAnimation(.easeInOut(duration: 0.18)) { controlsVisible.toggle() } },
@@ -235,21 +235,6 @@ struct PlayerView: View {
         }
     }
 
-}
-
-struct VideoSurface: UIViewRepresentable {
-    let player: AVPlayer
-
-    func makeUIView(context: Context) -> PlayerLayerView {
-        let view = PlayerLayerView()
-        view.playerLayer.videoGravity = .resizeAspect
-        view.playerLayer.player = player
-        return view
-    }
-
-    func updateUIView(_ view: PlayerLayerView, context: Context) {
-        if view.playerLayer.player !== player { view.playerLayer.player = player }
-    }
 }
 
 final class PlayerLayerView: UIView {

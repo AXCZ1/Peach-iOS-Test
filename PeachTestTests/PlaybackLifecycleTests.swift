@@ -1,24 +1,24 @@
-#if canImport(AVFoundation)
+#if os(macOS)
 import Foundation
 import XCTest
 @testable import PeachTestCore
 
-private final class DelayedPlanProtocol: URLProtocol, @unchecked Sendable {
+private final class DelayedTicketProtocol: URLProtocol, @unchecked Sendable {
     final class Pending: @unchecked Sendable {
         private let lock = NSLock()
-        private var requests: [DelayedPlanProtocol] = []
-        func append(_ request: DelayedPlanProtocol) { lock.lock(); requests.append(request); lock.unlock() }
+        private var requests: [DelayedTicketProtocol] = []
+        func append(_ request: DelayedTicketProtocol) { lock.lock(); requests.append(request); lock.unlock() }
         var count: Int { lock.lock(); defer { lock.unlock() }; return requests.count }
         func finish() {
             lock.lock(); let ready = requests; requests = []; lock.unlock()
-            for request in ready { request.reply("{\"id\":42,\"protocol\":\"range\",\"src\":\"http://example.invalid/test.mp4\"}") }
+            for request in ready { request.reply("{\"url\":\"/external-stream/42?ticket=fixture\"}") }
         }
     }
     static let pending = Pending()
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
-        if request.url?.path == "/api/stream-plan" { Self.pending.append(self) }
+        if request.url?.path == "/api/external-playback" { Self.pending.append(self) }
         else { reply("{}") }
     }
     override func stopLoading() {}
@@ -33,56 +33,59 @@ private final class DelayedPlanProtocol: URLProtocol, @unchecked Sendable {
 
 @MainActor
 final class PlaybackLifecycleTests: XCTestCase {
-    private func controller(previewOnly: Bool = false) throws -> PlaybackController {
+    private func delayedController() throws -> PlaybackController {
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [DelayedPlanProtocol.self]
+        configuration.protocolClasses = [DelayedTicketProtocol.self]
         let api = PeachAPI(baseURL: URL(string: "http://example.invalid")!, session: URLSession(configuration: configuration))
         let item = try JSONDecoder().decode(PeachItem.self, from: Data("{\"id\":42,\"duration\":120}".utf8))
-        return PlaybackController(api: api, item: item, previewOnly: previewOnly)
+        return PlaybackController(api: api, item: item, makeLocalPlayer: { _ in
+            XCTFail("An inactive page installed a decoder")
+            return nil
+        })
     }
 
     private func waitForRequests(_ count: Int) async throws {
         for _ in 0..<400 {
-            if DelayedPlanProtocol.pending.count == count { return }
+            if DelayedTicketProtocol.pending.count == count { return }
             try await Task.sleep(for: .milliseconds(5))
         }
-        XCTFail("The playback plan request did not start")
+        XCTFail("The original file ticket request did not start")
     }
 
-    func testLatePlanAfterOpeningDetailsDoesNotCreatePlayer() async throws {
-        let controller = try controller()
+    func testLateTicketAfterOpeningDetailsDoesNotCreatePlayer() async throws {
+        let controller = try delayedController()
         let request = Task { await controller.activate() }
         try await waitForRequests(1)
         let session = controller.sessionID
         controller.setActive(false)
         XCTAssertNotEqual(controller.sessionID, session)
-        DelayedPlanProtocol.pending.finish()
+        DelayedTicketProtocol.pending.finish()
         await request.value
-        XCTAssertNil(controller.player)
+        XCTAssertFalse(controller.hasVideoSurface)
         XCTAssertFalse(controller.isPlaying)
         controller.stop()
     }
 
-    func testOldAndNewPlansCannotReviveAnExitedPage() async throws {
-        let controller = try controller()
+    func testOldAndNewTicketsCannotReviveAnExitedPage() async throws {
+        let controller = try delayedController()
         let first = Task { await controller.activate() }
         try await waitForRequests(1)
         controller.setActive(false)
         let second = Task { await controller.activate() }
         try await waitForRequests(2)
         controller.stop()
-        DelayedPlanProtocol.pending.finish()
+        DelayedTicketProtocol.pending.finish()
         await first.value
         await second.value
-        XCTAssertNil(controller.player)
+        XCTAssertFalse(controller.hasVideoSurface)
         XCTAssertFalse(controller.isPlaying)
     }
     func testBoostReturnsToNormalOnReleaseAndLeavingPage() async throws {
-        let controller = try controller()
-        let request = Task { await controller.activate() }
-        try await waitForRequests(1)
-        DelayedPlanProtocol.pending.finish(); await request.value
-        let player = try XCTUnwrap(controller.player, "Playback plan failed: \(controller.phase)")
+        let fixture = try OriginalPlaybackFixture()
+        defer { fixture.stop() }
+        let controller = try fixture.controller()
+        await controller.activate()
+        let player = try XCTUnwrap(controller.player, "\(controller.phase)")
         controller.beginBoost()
         XCTAssertTrue(controller.isBoosting)
         XCTAssertEqual(player.defaultRate, 2)
@@ -96,11 +99,11 @@ final class PlaybackLifecycleTests: XCTestCase {
     }
 
     func testPiPKeepsSessionAliveWhileAppIsInactive() async throws {
-        let controller = try controller()
-        let request = Task { await controller.activate() }
-        try await waitForRequests(1)
-        DelayedPlanProtocol.pending.finish(); await request.value
-        let player = try XCTUnwrap(controller.player, "Playback plan failed: \(controller.phase)")
+        let fixture = try OriginalPlaybackFixture()
+        defer { fixture.stop() }
+        let controller = try fixture.controller()
+        await controller.activate()
+        let player = try XCTUnwrap(controller.player, "\(controller.phase)")
         let session = controller.sessionID
         controller.setPictureInPicture(true)
         controller.setActive(false)

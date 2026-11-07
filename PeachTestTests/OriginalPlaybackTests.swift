@@ -8,13 +8,14 @@ final class OriginalPlaybackTests: XCTestCase {
     func testH264OriginalPlaysAndSeeksThroughReverseProxy() async throws {
         let fixture = try OriginalPlaybackFixture(upstreamOrigin: "http://peach-upstream.invalid:8900")
         defer { fixture.stop() }
-        let controller = try makeController(fixture, id: 42001)
+        let controller = try fixture.controller()
         defer { controller.stop(); PlayerMemory.shared.clear(42001) }
         await controller.activate()
         let player = try XCTUnwrap(controller.player, "\(controller.phase)")
         let asset = try XCTUnwrap(player.currentItem?.asset as? AVURLAsset)
         try await waitFor("original H.264 playback") { controller.isPlaying && player.currentTime().seconds > 0.2 }
         XCTAssertEqual(controller.formatNote, "原文件直放")
+        XCTAssertNil(controller.localPlayer)
         XCTAssertEqual(player.currentItem?.presentationSize, CGSize(width: 1920, height: 1080))
         controller.seek(to: 8)
         try await waitFor("playback after seeking") { player.currentTime().seconds > 8.1 && controller.isPlaying }
@@ -54,14 +55,20 @@ final class OriginalPlaybackTests: XCTestCase {
         XCTAssertNil(counts["plans"])
     }
 
-    func testFormatFailureSwitchesOnceAndPreservesPausedPosition() async throws {
+    func testFormatFailureUsesSameOriginalAndPreservesPausedPosition() async throws {
         let fixture = try OriginalPlaybackFixture()
         defer { fixture.stop() }
-        let controller = try makeController(fixture, id: 42002)
+        let local = RecordingLocalPlayer()
+        var openedURLs: [URL] = []
+        let controller = try fixture.controller(id: 42002, makeLocalPlayer: { url in
+            openedURLs.append(url)
+            return local
+        })
         defer { controller.stop(); PlayerMemory.shared.clear(42002) }
         await controller.activate()
         let original = try XCTUnwrap(controller.player, "\(controller.phase)")
         let item = try XCTUnwrap(original.currentItem)
+        let originalURL = try XCTUnwrap((item.asset as? AVURLAsset)?.url)
         try await waitFor("initial playback") { controller.isPlaying && controller.currentTime > 0.2 }
         controller.seek(to: 8)
         try await waitFor("seek to the resume position") { original.currentTime().seconds > 8.1 }
@@ -72,57 +79,104 @@ final class OriginalPlaybackTests: XCTestCase {
                                             userInfo: [AVPlayerItemFailedToPlayToEndTimeErrorKey:
                                                 NSError(domain: AVFoundationErrorDomain, code: AVError.Code.decoderNotFound.rawValue)])
         }
-        try await waitFor("replacement stream at the same position") {
-            controller.player !== original && controller.phase == .ready &&
-                abs((controller.player?.currentTime().seconds ?? 0) - resume) < 0.4
-        }
+        try await waitFor("replacement decoder") { controller.localPlayer === local }
+        XCTAssertNil(controller.player)
+        XCTAssertEqual(openedURLs, [originalURL])
+        XCTAssertEqual(local.seekTarget ?? 0, resume, accuracy: 0.4)
+        XCTAssertFalse(local.playing)
         XCTAssertFalse(controller.isPlaying)
-        XCTAssertEqual(controller.formatNote, "原始 MP4 流")
+        XCTAssertEqual(controller.formatNote, "原文件直放 · VLC")
         let counts = try await fixture.counts()
         XCTAssertEqual(counts["tickets"], 1)
-        XCTAssertEqual(counts["plans"], 1)
+        XCTAssertNil(counts["plans"])
         XCTAssertEqual(counts["play_marks"], 1)
     }
 
-    func testUnavailableTicketUsesExistingPlanButForeignTicketIsRejected() async throws {
+    func testUnavailableOrForeignTicketFailsWithoutAPlanRequest() async throws {
         let fixture = try OriginalPlaybackFixture()
         defer { fixture.stop() }
-        let missing = try makeController(fixture, id: 42004)
+        let missing = try fixture.controller(id: 42004)
         defer { missing.stop(); PlayerMemory.shared.clear(42004) }
         await missing.activate()
-        XCTAssertEqual(missing.formatNote, "原始 MP4 流")
+        XCTAssertFalse(missing.hasVideoSurface)
+        guard case .failed = missing.phase else { return XCTFail("A missing original ticket should fail") }
 
-        let foreign = try makeController(fixture, id: 42003)
+        let foreign = try fixture.controller(id: 42003)
         defer { foreign.stop() }
         await foreign.activate()
-        XCTAssertNil(foreign.player)
+        XCTAssertFalse(foreign.hasVideoSurface)
         guard case .failed = foreign.phase else { return XCTFail("Foreign playback ticket was accepted") }
         let counts = try await fixture.counts()
         XCTAssertEqual(counts["tickets"], 2)
-        XCTAssertEqual(counts["plans"], 1)
+        XCTAssertNil(counts["plans"])
     }
 
-    func testAudioOnlyOriginalUsesCompatibilityVideoInstead() async throws {
+    func testNoAVVideoTrackUsesLocalDecoderAndPreservesPlaybackControls() async throws {
         let fixture = try OriginalPlaybackFixture()
         defer { fixture.stop() }
-        let controller = try makeController(fixture, id: 42006)
+        let local = RecordingLocalPlayer()
+        var source: URL?
+        let controller = try fixture.controller(id: 42006, makeLocalPlayer: { source = $0; return local })
         defer { controller.stop(); PlayerMemory.shared.clear(42006) }
         await controller.activate()
-        XCTAssertEqual(controller.formatNote, "原始 MP4 流")
-        try await waitFor("video from the compatibility stream") {
-            controller.isPlaying && controller.player?.currentItem?.presentationSize.width == 1920
-        }
+        XCTAssertEqual(source?.path, "/external-stream/42006")
+        XCTAssertNil(controller.player)
+        XCTAssertTrue(controller.localPlayer === local)
+        XCTAssertTrue(local.muted)
+        XCTAssertTrue(local.playing)
+        local.showFrame(at: 2)
+        XCTAssertEqual(controller.phase, .ready)
+        XCTAssertTrue(controller.isPlaying)
+        controller.beginBoost()
+        XCTAssertEqual(local.rate, 2)
+        controller.endBoost()
+        XCTAssertEqual(local.rate, 1)
+        controller.beginScrubbing()
+        XCTAssertFalse(local.playing)
+        controller.endScrubbing(at: 12)
+        XCTAssertTrue(local.playing)
+        XCTAssertEqual(local.seekTarget, 12)
+        local.completeSeek(at: 12.25)
+        XCTAssertEqual(controller.currentTime, 12.25)
+        controller.setMuted(false)
+        XCTAssertFalse(local.muted)
+        controller.setActive(false)
+        XCTAssertFalse(local.playing)
+        controller.stop()
+        XCTAssertTrue(local.stopped)
         let counts = try await fixture.counts()
         XCTAssertEqual(counts["tickets"], 1)
-        XCTAssertEqual(counts["plans"], 1)
+        XCTAssertNil(counts["plans"])
     }
 
-    private func makeController(_ fixture: OriginalPlaybackFixture, id: Int) throws -> PlaybackController {
-        PlayerMemory.shared.clear(id)
-        let item = try JSONDecoder().decode(PeachItem.self, from: Data("{\"id\":\(id),\"name\":\"fixture.mp4\",\"duration\":24}".utf8))
-        let controller = PlaybackController(api: PeachAPI(baseURL: fixture.baseURL), item: item, preferOriginal: true)
-        controller.setMuted(true)
-        return controller
+    func testMKVUsesSignedOriginalWithoutAVProbeOrStreamPlan() async throws {
+        let fixture = try OriginalPlaybackFixture()
+        defer { fixture.stop() }
+        let local = RecordingLocalPlayer()
+        var source: URL?
+        let controller = try fixture.controller(name: "fixture.mkv", makeLocalPlayer: { source = $0; return local })
+        defer { controller.stop() }
+        await controller.activate()
+        XCTAssertEqual(source?.path, "/external-stream/42001")
+        XCTAssertTrue(controller.localPlayer === local)
+        let counts = try await fixture.counts()
+        XCTAssertEqual(counts["tickets"], 1)
+        XCTAssertNil(counts["original_ranges"])
+        XCTAssertNil(counts["plans"])
+    }
+
+    func testCardPreviewKeepsItsExistingStreamPlanAndNeverMarksPlayed() async throws {
+        let fixture = try OriginalPlaybackFixture()
+        defer { fixture.stop() }
+        let controller = try fixture.controller(previewOnly: true)
+        defer { controller.stop() }
+        await controller.activate()
+        XCTAssertNotNil(controller.player)
+        XCTAssertNil(controller.localPlayer)
+        let counts = try await fixture.counts()
+        XCTAssertEqual(counts["plans"], 1)
+        XCTAssertNil(counts["tickets"])
+        XCTAssertNil(counts["play_marks"])
     }
 
     private func waitFor(_ reason: String, _ ready: () -> Bool) async throws {
@@ -134,7 +188,7 @@ final class OriginalPlaybackTests: XCTestCase {
     }
 }
 
-private struct OriginalPlaybackFixture {
+struct OriginalPlaybackFixture {
     let process: Process
     let baseURL: URL
 
@@ -161,8 +215,48 @@ private struct OriginalPlaybackFixture {
         return try JSONDecoder().decode([String: Int].self, from: data)
     }
 
+    @MainActor
+    func controller(id: Int = 42001, name: String = "fixture.mp4", previewOnly: Bool = false,
+                    makeLocalPlayer: (@MainActor (URL) -> (any LocalOriginalPlayer)?)? = nil) throws -> PlaybackController {
+        PlayerMemory.shared.clear(id)
+        let item = try JSONDecoder().decode(PeachItem.self, from: Data("{\"id\":\(id),\"name\":\"\(name)\",\"duration\":24}".utf8))
+        let controller = PlaybackController(api: PeachAPI(baseURL: baseURL), item: item, previewOnly: previewOnly,
+                                            makeLocalPlayer: makeLocalPlayer)
+        controller.setMuted(true)
+        return controller
+    }
+
     func stop() {
         if process.isRunning { process.terminate() }
+    }
+}
+
+@MainActor
+private final class RecordingLocalPlayer: LocalOriginalPlayer {
+    var onEvent: ((LocalPlaybackEvent) -> Void)?
+    var reportingPosition: Double?
+    var playing = false
+    var rate: Float = 1
+    var muted = false
+    var stopped = false
+    var seekTarget: Double?
+    var seekCompletion: ((Double?) -> Void)?
+
+    func setPlayback(_ shouldPlay: Bool, rate: Float) { playing = shouldPlay; self.rate = rate }
+    func setMuted(_ muted: Bool) { self.muted = muted }
+    func seek(to time: Double, completion: @escaping (Double?) -> Void) {
+        seekTarget = time
+        seekCompletion = completion
+    }
+    func stop() { stopped = true; playing = false }
+    func showFrame(at time: Double) {
+        reportingPosition = time
+        onEvent?(.sample(position: time, duration: 24, playing: playing, hasFrame: true))
+    }
+    func completeSeek(at time: Double) {
+        reportingPosition = time
+        seekCompletion?(time)
+        seekCompletion = nil
     }
 }
 #endif

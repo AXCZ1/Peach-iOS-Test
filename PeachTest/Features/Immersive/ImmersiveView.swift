@@ -273,7 +273,7 @@ private struct ImmersivePage: View {
         _controlsVisible = controlsVisible
         self.onEnded = onEnded; self.onOpenDetail = onOpenDetail
         self.onFeedback = onFeedback; self.onAdvance = onAdvance
-        let controller = PlaybackController(api: api, item: item, preferOriginal: true)
+        let controller = PlaybackController(api: api, item: item)
         _controller = StateObject(wrappedValue: controller)
         _presentation = StateObject(wrappedValue: PlayerPresentation(api: api, item: item, controller: controller))
     }
@@ -290,7 +290,7 @@ private struct ImmersivePage: View {
         GeometryReader { geometry in
             ZStack {
                 Color.black
-                if controller.player != nil {
+                if controller.hasVideoSurface {
                     SessionVideoSurface(session: presentation).ignoresSafeArea()
                 } else if !isActive {
                     RemoteImage(url: api.coverURL(code: current.coverKey.isEmpty ? current.displayNumber : current.coverKey))

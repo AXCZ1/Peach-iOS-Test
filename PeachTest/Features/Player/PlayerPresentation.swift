@@ -25,6 +25,7 @@ final class PlayerPresentation: NSObject, ObservableObject, Identifiable, AVPict
     var onPiPStarted: (() -> Void)?
     private var pip: AVPictureInPictureController?
     private var possibleObserver: NSKeyValueObservation?
+    private var frameObserver: NSKeyValueObservation?
     private var playerObserver: AnyCancellable?
     private var restoreCompletion: ((Bool) -> Void)?
     private var visible = false
@@ -32,9 +33,13 @@ final class PlayerPresentation: NSObject, ObservableObject, Identifiable, AVPict
 
     init(api: PeachAPI, item: PeachItem, controller: PlaybackController? = nil) {
         self.api = api; self.item = item
-        self.controller = controller ?? PlaybackController(api: api, item: item, preferOriginal: true)
+        self.controller = controller ?? PlaybackController(api: api, item: item)
         super.init()
         surface.playerLayer.videoGravity = .resizeAspect
+        frameObserver = surface.playerLayer.observe(\.isReadyForDisplay, options: [.new]) { [weak controller = self.controller] layer, _ in
+            guard layer.isReadyForDisplay, let player = layer.player else { return }
+            Task { @MainActor in controller?.noteDisplayedFrame(for: player) }
+        }
         if AVPictureInPictureController.isPictureInPictureSupported() {
             pip = AVPictureInPictureController(playerLayer: surface.playerLayer)
             pip?.delegate = self
@@ -64,6 +69,9 @@ final class PlayerPresentation: NSObject, ObservableObject, Identifiable, AVPict
     }
     func startPiP() {
         controller.endBoost()
+        if controller.localPlayer != nil {
+            message = "VLC 原文件播放暂不支持系统画中画"; return
+        }
         guard let pip, pip.isPictureInPicturePossible else {
             message = "当前视频尚不能进入画中画"; return
         }
@@ -101,7 +109,19 @@ final class PlayerPresentation: NSObject, ObservableObject, Identifiable, AVPict
 }
 
 struct SessionVideoSurface: UIViewRepresentable {
-    let session: PlayerPresentation
-    func makeUIView(context: Context) -> PlayerLayerView { session.surface }
-    func updateUIView(_ view: PlayerLayerView, context: Context) {}
+    let drawable: UIView
+
+    init(session: PlayerPresentation) {
+        drawable = (session.controller.localPlayer as? VLCOriginalPlayer)?.view ?? session.surface
+    }
+
+    func makeUIView(context: Context) -> UIView { UIView() }
+
+    func updateUIView(_ host: UIView, context: Context) {
+        guard drawable.superview !== host else { return }
+        host.subviews.forEach { $0.removeFromSuperview() }
+        drawable.frame = host.bounds
+        drawable.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        host.addSubview(drawable)
+    }
 }

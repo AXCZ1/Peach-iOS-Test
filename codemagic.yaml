@@ -14,3 +14,4 @@ workflows:
       - artifacts/ipa-validation.json
       - artifacts/build-summary.txt
       - build/xcodebuild.log
+      - build/pod-install.log
