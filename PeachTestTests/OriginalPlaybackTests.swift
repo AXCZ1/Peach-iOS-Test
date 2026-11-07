@@ -18,13 +18,22 @@ final class OriginalPlaybackTests: XCTestCase {
         controller.seek(to: 8)
         try await waitFor("playback after seeking") { player.currentTime().seconds > 8.1 && controller.isPlaying }
         controller.pause()
-        let frame = try await OriginalVideoFrame.capture(asset: asset, seconds: 8, hls: false)
-        XCTAssertEqual(frame.width, 1920)
-        XCTAssertEqual(frame.height, 1080)
         let counts = try await fixture.counts()
         XCTAssertEqual(counts["tickets"], 1)
         XCTAssertGreaterThan(counts["original_ranges", default: 0], 0)
         XCTAssertNil(counts["plans"])
+
+        // The frame generator owns its asset so it cannot compete with the player's seeks.
+        let inspectionAsset = AVURLAsset(url: asset.url)
+        do {
+            let frame = try await OriginalVideoFrame.capture(asset: inspectionAsset, seconds: 8, hls: false)
+            XCTAssertEqual(frame.width, 1920)
+            XCTAssertEqual(frame.height, 1080)
+        } catch {
+            let details = error as NSError
+            let tracks = try? await inspectionAsset.loadTracks(withMediaType: .video)
+            XCTFail("HEVC frame decode over HTTP: \(details.domain) \(details.code) (video tracks: \(tracks?.count ?? -1)) — \(details.localizedDescription)")
+        }
     }
 
     func testFormatFailureSwitchesOnceAndPreservesPausedPosition() async throws {
