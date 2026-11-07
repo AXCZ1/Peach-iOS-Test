@@ -86,5 +86,5 @@ class Fixture(BaseHTTPRequestHandler):
 
 
 with ThreadingHTTPServer(("127.0.0.1", 0), Fixture) as server:
-    print(server.server_port, flush=True)
+    print(f"{server.server_port:05d}", flush=True)
     server.serve_forever()

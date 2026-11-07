@@ -108,7 +108,8 @@ private struct OriginalPlaybackFixture {
         process.arguments = ["python3", "-u", script.path]
         process.standardOutput = stdout
         try process.run()
-        guard let data = try stdout.fileHandleForReading.read(upToCount: 32),
+        // Read exactly the five-digit port and newline; a larger read can wait for EOF.
+        guard let data = try stdout.fileHandleForReading.read(upToCount: 6),
               let port = Int(String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)) else {
             if process.isRunning { process.terminate() }
             throw PeachAPIError(message: "Original playback HTTP fixture did not start")
