@@ -1,3 +1,15 @@
+# Peach iOS Test — 构建 20 验收
+
+安装包：[Peach-iOS-Test-unsigned.20.ipa](C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.20.ipa)，17,160,095 字节，无签名 iPhone ARM64，iOS 17.0+。SHA256 `6236941b7e0fcf34161f9383d5a915416e9b98a9ffc9b239523d9037518ff8c9`。源码 `bffd25cf5061b0c1a8538d769a85935c6f85a71e`；Codemagic `6aef4b7524d1a22fe16b68e0`。本机校验及云端日志在 `artifacts/codemagic-20/`。
+
+- `PlaybackController.swift`：普通全屏、沉浸和播放墙只请求 Peach 签发的原文件地址。MP4 等可用 AVPlayer 的格式保留系统播放器；不能解码或播放已开始却没有首帧时，切换本机 VLC，沿用同一地址及原进度、暂停和静音状态。MKV 直接走本机 VLC。原文件不可取时报告错误，正式播放不会请求服务端 HLS 计划。
+- `VLCOriginalPlayer.swift`、`PlayerPresentation.swift` 及播放器视图：接入 MobileVLCKit 3.7.3、手势和进度；墙内和全屏迁移同一画面。系统画中画保留给 AVPlayer。大图短片预览、详情和进度条阅览图走原有路径。
+- Debug/Release 各 48 通过、3 跳过。真实 HTTP Range 上 H.264 起播和拖动通过；控制器在无 AV 视频轨、格式错误和 MKV 时只向本机解码器传入原地址，未请求 HLS。验证暂停位置、静音、倍速、失活、旧请求不会复活及预览不记观看。iPhone 编译成功，IPA 内 VLC 已链接、仅 ARM64、未签名，并通过本机校验。
+
+真机：覆盖安装后先打开 IPZZ-991，看是否出画面，单击画面确认标题下是「原文件直放 · VLC」，拖到没播过的位置。再从播放墙试播、切全屏及返回，检查画面和时间连续。用 MIDA-574 回归 AVPlayer 直放和系统小窗；用一部 MKV 验证本机播放。保留构建 19 回退。
+
+---
+
 # Peach iOS Test — 构建 19 验收
 
 安装包：[Peach-iOS-Test-unsigned.19.ipa](C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.19.ipa)，1,552,673 字节，无签名 iPhone ARM64，iOS 17.0+。SHA256 `965a588b61f294e9c07ccd1c4fb6d20bcd982662fd041c4573c230f9422f6828`。源码 `618aac185ace1dabb2227bc672cceec8e3e09c60`；Codemagic `6aef3f1df43f28dd128f0a63`；日志及校验在 `artifacts/codemagic-19/`。

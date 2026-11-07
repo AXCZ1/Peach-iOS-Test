@@ -1,4 +1,13 @@
-# 当前继续点（2026-11-07）
+# 当前继续点（2026-11-08）
+
+独立 App **构建 20** 已校验并放入 Downloads。正式播放从 Peach 取原文件 Range 地址，在 iPhone 上用 AVPlayer 或 MobileVLCKit 3.7.3 解码；普通、沉浸和播放墙共用。正式播放取消 HLS 转码回退，卡片与图片预览保持既有路径。VLC 分支没有系统画中画，AVPlayer 保留。
+
+- IPA：C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.20.ipa；17,160,095 字节；SHA256 `6236941b7e0fcf34161f9383d5a915416e9b98a9ffc9b239523d9037518ff8c9`。
+- 源码 `bffd25cf5061b0c1a8538d769a85935c6f85a71e`，Codemagic `6aef4b7524d1a22fe16b68e0`。Debug/Release 各 48 通过、3 跳过。编译从固定 Podfile.lock 生成 `PeachTest.xcworkspace`，IPA 验证链接和内嵌 VLC。
+- IPZZ-991 的旧版日志：原文件 Range 成功后退 HLS，冷分片约 2–4 秒。构建 20 待用 iPhone 验证其画面、拖动和墙内切换；见 ACCEPTANCE.md 首节。服务端、媒体及 NAS iOS 未改。
+- 回退保留构建 19；源码备份 `backups/phone-local-playback-20261107-234246/source.bundle`（`3292a93`）。
+
+## 构建 19 历史
 
 独立 App **构建 19** 已校验并放入 Downloads。恢复原底栏位置和 60 点高度，馆藏内容接到栏顶。域名反代下的原文件播放取票不发送浏览器来源头，仍需认证；未改 Peach 服务端、媒体、NAS iOS 或播放墙布局。
 
