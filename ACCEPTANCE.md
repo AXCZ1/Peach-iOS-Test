@@ -1,3 +1,16 @@
+# Peach iOS Test — 构建 22 验收
+
+安装包：[Peach-iOS-Test-unsigned.22.ipa](C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.22.ipa)，20,899,961 字节，无签名 iPhone ARM64，iOS 17.0+。SHA256 `1148d4fb611c49420591f09099e2b639be2f249ef1797f59161336a8df281d4a`。源码 `4c4644f9a1bdf3766992f923cb86a07eef23c4fd`；Codemagic `6aef74cea3dc1d99849ebb15`。本机校验与云端日志见 `artifacts/codemagic-22/`。
+
+- `VLCOriginalPlayer.swift`、`PlayerPresentation.swift`、`PlaybackController.swift`：用 VLCKit 4.0.0a25 的现有画面接入系统小窗，使用同一个原文件会话和播放位置；接入系统暂停、继续、跳转、退出及返回全屏。AVPlayer 保留原小窗入口。
+- `PlayerView.swift`、`VideoWallView.swift`：普通播放器左右拖动画面，从当前进度预览目标时间及已有缩略图，松手跳转；播放墙及其全屏和小窗返回页均不启用此手势，仍可操作原进度条。沉浸模式沿用既有手势。
+- `Podfile`、`Podfile.lock`、`ThirdPartyNotices.txt`、`verify-ipa.py`：固定官方解码器版本，校验 IPA 包含 iPhone ARM64 的 VLC 显示组件。
+- `OriginalPlaybackTests.swift`：实际 HTTP Range H.264 测试验证拖动中只更新预览、松手后跳转；本地播放会话测试验证小窗期间暂停、继续、跳转和恢复只使用一张原文件票。云端 Debug/Release 各 49 通过、3 跳过；iPhone Release 编译及 IPA 校验通过。
+
+真机待验收：用 IPZZ-991 对比构建 20 的起播与跳转速度，点「小窗」后回桌面，测试暂停、跳转、返回全屏及声音；在普通播放器竖屏和横屏拖动画面，对照缩略图与落点，再确认播放墙只通过原进度条调整进度。用 MIDA-574 回归 AVPlayer 小窗。构建 20 保留回退。
+
+---
+
 # Peach iOS Test — 构建 20 验收
 
 安装包：[Peach-iOS-Test-unsigned.20.ipa](C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.20.ipa)，17,160,095 字节，无签名 iPhone ARM64，iOS 17.0+。SHA256 `6236941b7e0fcf34161f9383d5a915416e9b98a9ffc9b239523d9037518ff8c9`。源码 `bffd25cf5061b0c1a8538d769a85935c6f85a71e`；Codemagic `6aef4b7524d1a22fe16b68e0`。本机校验及云端日志在 `artifacts/codemagic-20/`。

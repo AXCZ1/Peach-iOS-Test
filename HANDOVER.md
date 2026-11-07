@@ -1,5 +1,13 @@
 # 当前继续点（2026-11-08）
 
+独立 App **构建 22** 已校验并放入 Downloads。VLCKit 4.0.0a25 的画面可以接入系统小窗；普通播放左右拖动画面预览并调整进度，播放墙及从墙打开的全屏保持原手势。正式播放仍由 iPhone 解码 Peach 原文件。
+
+- IPA：C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.22.ipa；20,899,961 字节；SHA256 `1148d4fb611c49420591f09099e2b639be2f249ef1797f59161336a8df281d4a`。
+- 源码 `4c4644f9a1bdf3766992f923cb86a07eef23c4fd`，Codemagic `6aef74cea3dc1d99849ebb15`。Debug/Release 各 49 通过、3 跳过；iPhone Release 和 IPA 校验通过。见 ACCEPTANCE.md 首节。
+- 真机待用 IPZZ-991 验证系统小窗和起播速度，并回归普通播放拖动、AVPlayer 小窗及播放墙。用户已反馈构建 20 播放变快；保留构建 20 的 IPA 和源码备份 `backups/vlc-pip-20261108-001740/source.bundle`（`d163e33`）。
+
+## 构建 20 历史
+
 独立 App **构建 20** 已校验并放入 Downloads。正式播放从 Peach 取原文件 Range 地址，在 iPhone 上用 AVPlayer 或 MobileVLCKit 3.7.3 解码；普通、沉浸和播放墙共用。正式播放取消 HLS 转码回退，卡片与图片预览保持既有路径。VLC 分支没有系统画中画，AVPlayer 保留。
 
 - IPA：C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.20.ipa；17,160,095 字节；SHA256 `6236941b7e0fcf34161f9383d5a915416e9b98a9ffc9b239523d9037518ff8c9`。
