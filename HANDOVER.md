@@ -1,5 +1,13 @@
 # 当前继续点（2026-11-07）
 
+独立 App **构建 13** 已打包和校验，等待 iPhone 验收。仅改 App 的四项反馈：详情预览宽高各翻倍、秒开已有图并提前取原画；大图预览首帧与缓冲；横屏进度区；馆藏导航上方黑边。播放墙内嵌、NAS iOS、域名、后端和媒体未改。
+
+- IPA：C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.13.ipa；1,537,197 字节；SHA256 `0ce060f8713ba2b4b8e59ebc3ce200825859625a1ca44496a91f7d86d8822efb`。
+- 源码 `e0fa70f10dafd085af952ddd6035f9e99009a93a`，Codemagic `6aeeebcf630282fcf14921fb`。Debug/Release 各 41 通过、3 跳过。原帧和缓冲时钟测试通过，未启动模拟器。
+- 真机验证按 ACCEPTANCE.md 首节，优先 START-108 大图、冷取 4K 原画、横屏与底栏。回退包保留构建 12，回退前源码状态为 `0aef8d3`。
+
+## 构建 12 历史
+
 当前交付是独立 App **构建 12**，用户自行配置域名，本轮只改 App；不接入 NAS iOS，也不改播放墙内嵌播放器、服务端或媒体。
 
 - IPA：C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.12.ipa；1,511,320 字节；SHA256 `1cae105c790a73b240e2bfb96e5fd52da85e33f5e35a255ee5e839a27b89db97`。

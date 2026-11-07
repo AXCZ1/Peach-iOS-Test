@@ -1,4 +1,21 @@
-# Peach iOS Test — 构建 12 验收
+# Peach iOS Test — 构建 13 验收
+
+安装包：[Peach-iOS-Test-unsigned.13.ipa](C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.13.ipa)，1,537,197 字节，无签名 iPhone ARM64，iOS 17.0+。SHA256 `0ce060f8713ba2b4b8e59ebc3ce200825859625a1ca44496a91f7d86d8822efb`。源码 `e0fa70f10dafd085af952ddd6035f9e99009a93a`；Codemagic `6aeeebcf630282fcf14921fb`；日志及本机校验在 `artifacts/codemagic-13/`。构建 12 保留回退。
+
+| 范围 | 修改与回归 |
+| --- | --- |
+| 详情预览 | PreviewFilmstrip.swift、ItemDetailView.swift、OriginalVideoFrame.swift：卡片从 144×81 到 288×162 点，点开先显示已有图。预览条可见时提前取一张原尺寸帧，复用正在加载的请求及原图缓存；切图、离开或进入播放时停止不再需要的取帧。允许 0.35 秒时间偏差以减少定位开销。 |
+| 大图视频 | PreviewFilmstrip.swift、PlaybackController.swift、PreviewVideoSample.swift：等可显示的帧才替换封面；播放过约 1.4 秒才跳下一段。原采样点、停留 3 秒、静音和不计观看记录保持。普通、沉浸和播放墙使用原播放路径。 |
+| 横屏进度 | PlayerView.swift、MediaArtwork.swift：普通播放横屏下时间、进度、按钮同一行，进度条保留拖动预览和 44 点触区。竖屏、沉浸、播放墙原布局保留。 |
+| 导航黑边 | LibraryRootView.swift：列表与底栏共用安全区，去掉独立底部占位和分隔线。馆藏、索引、我的三个入口保持。 |
+
+Codemagic Debug/Release 各 44 项：41 通过、3 跳过，iPhone Release 编译及两端 IPA 校验通过。OriginalVideoFrameTests.swift 实测 1280×720 原帧与 Range 缓存复用；让真实 AVPlayer 停住 1.55 秒，片段没有提前结束，恢复后正常完成。Linux 核心含本地 HTTP 续期用例 36 通过、2 隔离用例跳过。生产仅只读核对 START-108：4K、30 张现有预览，拼图约 203 KB。未改播放墙内嵌、NAS iOS、域名或服务端，未启动模拟器。
+
+真机优先确认：详情点开及横滑预览是否立刻出图、原画切换速度；START-108 与另一部曾黑屏作品的大图静音预览；横屏拖动和小窗；馆藏列表贴到底栏，切换索引和我的正常。首次未缓存的 4K 原画仍取决于播放源与网络。
+
+---
+
+# 构建 12 — 独立登录与缓存验收记录
 
 安装包：[Peach-iOS-Test-unsigned.12.ipa](C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.12.ipa)，1,511,320 字节，无签名 iPhone ARM64，iOS 17.0+。SHA256 `1cae105c790a73b240e2bfb96e5fd52da85e33f5e35a255ee5e839a27b89db97`。源码 `9e968bc9c11c7f94644695d329f716a075584ea2`；Codemagic `6aeed913ab4a65afcf3fa24c`；日志与本地校验在 `artifacts/codemagic-12/`。
 
