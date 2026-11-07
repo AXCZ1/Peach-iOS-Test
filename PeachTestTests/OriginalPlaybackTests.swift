@@ -5,8 +5,8 @@ import XCTest
 
 @MainActor
 final class OriginalPlaybackTests: XCTestCase {
-    func testH264OriginalPlaysAndSeeksOverHTTPRange() async throws {
-        let fixture = try OriginalPlaybackFixture()
+    func testH264OriginalPlaysAndSeeksThroughReverseProxy() async throws {
+        let fixture = try OriginalPlaybackFixture(upstreamOrigin: "http://peach-upstream.invalid:8900")
         defer { fixture.stop() }
         let controller = try makeController(fixture, id: 42001)
         defer { controller.stop(); PlayerMemory.shared.clear(42001) }
@@ -138,12 +138,12 @@ private struct OriginalPlaybackFixture {
     let process: Process
     let baseURL: URL
 
-    init() throws {
+    init(upstreamOrigin: String? = nil) throws {
         let script = try XCTUnwrap(Bundle.module.url(forResource: "original-playback-http", withExtension: "py", subdirectory: "Fixtures"))
         let process = Process()
         let stdout = Pipe()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["python3", "-u", script.path]
+        process.arguments = ["python3", "-u", script.path] + (upstreamOrigin.map { [$0] } ?? [])
         process.standardOutput = stdout
         try process.run()
         // Read exactly the five-digit port and newline; a larger read can wait for EOF.

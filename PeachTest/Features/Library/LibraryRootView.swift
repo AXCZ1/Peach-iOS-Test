@@ -50,8 +50,10 @@ struct LibraryRootView: View {
                     } else {
                         AccountHubView(api: api, session: session, libraryCount: libraries.count)
                     }
+                    bottomBar
                 }
-                .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
+                // The bar already occupies the bottom edge; don't reserve the home inset again.
+                .ignoresSafeArea(.container, edges: .bottom)
             }
             .navigationBarHidden(true)
             .toolbar(.hidden, for: .navigationBar)
@@ -376,8 +378,8 @@ struct LibraryRootView: View {
         }
         .padding(.horizontal, 30)
         .padding(.vertical, 6)
-        .background(.ultraThinMaterial, ignoresSafeAreaEdges: .bottom)
-        .background(PeachTheme.background.opacity(0.82), ignoresSafeAreaEdges: .bottom)
+        .background(.ultraThinMaterial, ignoresSafeAreaEdges: [])
+        .background(PeachTheme.background.opacity(0.82), ignoresSafeAreaEdges: [])
     }
 
     private var subtitle: String {

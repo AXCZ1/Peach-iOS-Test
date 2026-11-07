@@ -1,5 +1,6 @@
 import json
 import re
+import sys
 from collections import Counter
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -13,6 +14,7 @@ HEVC = (FIXTURES / "hev1-tail.mp4").read_bytes()
 AUDIO = (FIXTURES / "audio-only.m4a").read_bytes()
 COUNTS = Counter()
 LOCK = Lock()
+UPSTREAM_ORIGIN = sys.argv[1] if len(sys.argv) > 1 else None
 
 
 class Fixture(BaseHTTPRequestHandler):
@@ -36,8 +38,10 @@ class Fixture(BaseHTTPRequestHandler):
         self.rfile.read(int(self.headers.get("Content-Length", "0")))
         if route.path == "/api/external-playback":
             self.count("tickets")
-            if self.headers.get("Origin", "").rstrip("/") != "http://" + self.headers["Host"]:
-                return self.json({}, 403)
+            origin = self.headers.get("Origin", "").rstrip("/")
+            upstream = UPSTREAM_ORIGIN or "http://" + self.headers["Host"]
+            if origin and origin != upstream:
+                return self.json({"error": "请从 Peach 配置页提交"}, 403)
             asset = parse_qs(route.query).get("id", [""])[0]
             if asset == "42003":
                 return self.json({"url": "https://example.invalid/external-stream/42003?ticket=fixture"})

@@ -21,8 +21,7 @@ private final class PeachOriginRedirects: NSObject, URLSessionTaskDelegate {
 }
 
 /// One client for the running Peach instance. Reads use the authenticated
-/// session; writes mirror the web contract at 0.52.0 and always send
-/// `Origin` so Peach's same-origin guard accepts them.
+/// session; data writes mirror the web contract at 0.52.0 and send `Origin`.
 final class PeachAPI: @unchecked Sendable {
     nonisolated static let defaultAddress = "http://192.168.5.5:8900/"
 
@@ -340,9 +339,11 @@ final class PeachAPI: @unchecked Sendable {
     /// Peach's external-player ticket gives AVPlayer the original Range stream.
     func originalPlaybackURL(id: Int) async throws -> URL {
         struct Ticket: Decodable { let url: String }
+        // A reverse proxy can give Peach a different origin from the App's address.
+        // The native ticket endpoint accepts an authenticated request without Origin.
         let ticket: Ticket = try await post("/api/external-playback", query: [
             URLQueryItem(name: "id", value: String(id))
-        ], body: [:])
+        ], body: [:], includeOrigin: false)
         guard let source = URL(string: ticket.url, relativeTo: baseURL)?.absoluteURL,
               Self.sameOrigin(source, baseURL), source.path == "/external-stream/\(id)" else {
             throw PeachAPIError(message: "原文件播放地址与当前 Peach 服务不一致")
@@ -488,12 +489,12 @@ final class PeachAPI: @unchecked Sendable {
         return try decoder.decode(T.self, from: data)
     }
 
-    private func post<T: Decodable>(_ path: String, query: [URLQueryItem] = [], body: [String: Any]) async throws -> T {
+    private func post<T: Decodable>(_ path: String, query: [URLQueryItem] = [], body: [String: Any], includeOrigin: Bool = true) async throws -> T {
         var request = URLRequest(url: url(path: path, query: query))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue(baseURL.absoluteString, forHTTPHeaderField: "Origin")
+        if includeOrigin { request.setValue(baseURL.absoluteString, forHTTPHeaderField: "Origin") }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, http) = try await authenticatedData(for: request)
         guard (200..<300).contains(http.statusCode) else {
