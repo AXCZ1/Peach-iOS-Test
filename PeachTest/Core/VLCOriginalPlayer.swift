@@ -1,6 +1,7 @@
 #if os(iOS) && !SWIFT_PACKAGE
+import AVFoundation
 import UIKit
-@preconcurrency import MobileVLCKit
+@preconcurrency import VLCKit
 
 /// The URL is Peach's signed Range URL, so VLC doesn't need the App's cookie or password.
 @MainActor
@@ -47,6 +48,20 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
         return position
     }
 
+    var isSeekable: Bool { player?.isSeekable == true }
+
+    var pictureInPictureLayer: AVSampleBufferDisplayLayer? {
+        // VLCKit's Apple renderer puts the decoded frames into this layer.
+        func findLayer(in view: UIView) -> AVSampleBufferDisplayLayer? {
+            if let layer = view.layer as? AVSampleBufferDisplayLayer { return layer }
+            for child in view.subviews {
+                if let layer = findLayer(in: child) { return layer }
+            }
+            return nil
+        }
+        return findLayer(in: view)
+    }
+
     func setPlayback(_ shouldPlay: Bool, rate: Float) {
         guard let player else { return }
         player.rate = rate
@@ -79,6 +94,7 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
             completion(nil)
             return
         }
+        cancelSeek()
         pendingSeek = Seek(target: Int32((time * 1_000).rounded()), completion: completion)
         applyMute(to: player)
         updatePulse()
@@ -87,7 +103,7 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
     func stop() {
         pulse?.cancel()
         pulse = nil
-        pendingSeek = nil
+        cancelSeek()
         firstFrameDeadline = nil
         playbackRequested = false
         guard let player else { return }
@@ -117,7 +133,8 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
 
     private func poll() {
         guard let player else { return }
-        if player.state == .error {
+        let state = player.state
+        if state == .error {
             fail("iPhone 无法打开原文件。请检查 Peach 连接和文件格式。")
             return
         }
@@ -126,7 +143,7 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
             position = Double(milliseconds) / 1_000
         }
         let total = duration(of: player)
-        if !hasFrame, (player.media?.statistics.displayedPictures ?? 0) > 0 {
+        if !hasFrame, state != .stopped, (player.media?.statistics.displayedPictures ?? 0) > 0 {
             hasFrame = true
             firstFrameDeadline = nil
         }
@@ -134,13 +151,10 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
             fail("原文件没有输出画面。")
             return
         }
-        if player.state == .ended {
-            guard hasFrame else {
-                fail("原文件没有可播放的视频画面。")
-                return
-            }
+        // VLC 4 reports .stopped at EOF. It also starts in .stopped before opening.
+        if state == .stopped, hasFrame, !didEnd {
             playbackRequested = false
-            pendingSeek = nil
+            cancelSeek()
             didEnd = true
             if total > 0 { position = total }
             onEvent?(.sample(position: position, duration: total, playing: false, hasFrame: true))
@@ -175,6 +189,12 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
         }
     }
 
+    private func cancelSeek() {
+        let seek = pendingSeek
+        pendingSeek = nil
+        seek?.completion(nil)
+    }
+
     private func applyMute(to player: VLCMediaPlayer) {
         let mute = muted || pendingSeek != nil
         if let audio = player.audio, audio.isMuted != mute { audio.isMuted = mute }
@@ -191,7 +211,7 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
     }
 }
 
-/// MobileVLCKit 3.7.3 may return from stop before the input is stopped.
+/// VLCKit stops asynchronously; keep the decoder alive until it finishes.
 private final class VLCPlayerRetirement: @unchecked Sendable {
     private let player: VLCMediaPlayer
     private var stateObserver: NSObjectProtocol?
@@ -201,7 +221,7 @@ private final class VLCPlayerRetirement: @unchecked Sendable {
 
     func stopAndReleaseWhenStopped() {
         stateObserver = NotificationCenter.default.addObserver(
-            forName: Notification.Name("VLCMediaPlayerStateChanged"),
+            forName: VLCMediaPlayer.stateChangedNotification,
             object: player, queue: .main
         ) { [self] _ in
             finishIfStopped()

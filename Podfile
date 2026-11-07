@@ -5,5 +5,5 @@ project 'PeachTest.xcodeproj'
 
 target 'PeachTest' do
   use_frameworks!
-  pod 'MobileVLCKit', '3.7.3'
+  pod 'VLCKit', '4.0.0a25'
 end

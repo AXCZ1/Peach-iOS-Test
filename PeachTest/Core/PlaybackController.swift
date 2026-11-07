@@ -291,13 +291,14 @@ final class PlaybackController: ObservableObject {
         firstFrameTask = nil
     }
 
-    func seek(to time: Double) {
-        guard hasVideoSurface else { return }
+    func seek(to time: Double, completion: (() -> Void)? = nil) {
+        guard hasVideoSurface else { completion?(); return }
         seekPreview = nil
         let clamped = max(0, min(time, duration > 0 ? duration : time))
         currentTime = clamped
         if let localPlayer {
             localPlayer.seek(to: clamped) { [weak self, weak localPlayer] reached in
+                defer { completion?() }
                 guard let self, let localPlayer, self.localPlayer === localPlayer, !self.stopped,
                       let reached else { return }
                 self.currentTime = reached
@@ -312,6 +313,7 @@ final class PlaybackController: ObservableObject {
         seeks += 1
         if !previewOnly { PlayerMemory.shared.save(clamped, for: item.id) }
         flushActivity()
+        completion?()
     }
 
     func skip(by seconds: Double) {

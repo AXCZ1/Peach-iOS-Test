@@ -17,7 +17,12 @@ final class OriginalPlaybackTests: XCTestCase {
         XCTAssertEqual(controller.formatNote, "原文件直放")
         XCTAssertNil(controller.localPlayer)
         XCTAssertEqual(player.currentItem?.presentationSize, CGSize(width: 1920, height: 1080))
-        controller.seek(to: 8)
+        controller.beginScrubbing()
+        let beforeScrubbing = player.currentTime().seconds
+        controller.previewSeek(8)
+        XCTAssertEqual(controller.seekPreview, 8)
+        XCTAssertEqual(player.currentTime().seconds, beforeScrubbing, accuracy: 0.2)
+        controller.endScrubbing(at: 8)
         try await waitFor("playback after seeking") { player.currentTime().seconds > 8.1 && controller.isPlaying }
         controller.pause()
         let counts = try await fixture.counts()
@@ -162,6 +167,40 @@ final class OriginalPlaybackTests: XCTestCase {
         let counts = try await fixture.counts()
         XCTAssertEqual(counts["tickets"], 1)
         XCTAssertNil(counts["original_ranges"])
+        XCTAssertNil(counts["plans"])
+    }
+
+    func testLocalPictureInPictureKeepsTheOriginalSessionAndCompletesItsSeek() async throws {
+        let fixture = try OriginalPlaybackFixture()
+        defer { fixture.stop() }
+        let local = RecordingLocalPlayer()
+        let controller = try fixture.controller(id: 42006, name: "fixture.mkv", makeLocalPlayer: { _ in local })
+        defer { controller.stop(); PlayerMemory.shared.clear(42006) }
+        await controller.activate()
+        local.showFrame(at: 2)
+        let session = controller.sessionID
+
+        controller.setPictureInPicture(true)
+        controller.setActive(false)
+        XCTAssertTrue(local.playing)
+        controller.pause()
+        XCTAssertFalse(local.playing)
+        var seekCompletions = 0
+        controller.seek(to: 12) { seekCompletions += 1 }
+        XCTAssertEqual(seekCompletions, 0)
+        local.completeSeek(at: 12.25)
+        XCTAssertEqual(seekCompletions, 1)
+        XCTAssertEqual(controller.currentTime, 12.25)
+        controller.resume()
+        XCTAssertTrue(local.playing)
+
+        controller.setActive(true)
+        controller.setPictureInPicture(false)
+        XCTAssertTrue(local.playing)
+        XCTAssertTrue(controller.localPlayer === local)
+        XCTAssertEqual(controller.sessionID, session)
+        let counts = try await fixture.counts()
+        XCTAssertEqual(counts["tickets"], 1)
         XCTAssertNil(counts["plans"])
     }
 

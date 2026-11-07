@@ -18,6 +18,7 @@ struct PlayerView: View {
     @State private var gestureFeedback: String?
     @State private var feedbackID = UUID()
     @State private var controlsVisible = true
+    @State private var screenScrubOrigin: Double?
 
     init(item: PeachItem, api: PeachAPI) {
         self.init(session: PlayerPresentation(api: api, item: item))
@@ -35,18 +36,7 @@ struct PlayerView: View {
             Color.black.ignoresSafeArea()
             if model.hasVideoSurface {
                 SessionVideoSurface(session: session).ignoresSafeArea()
-                MediaGestureOverlay(
-                    onTap: { withAnimation(.easeInOut(duration: 0.18)) { controlsVisible.toggle() } },
-                    onDoubleTap: { fraction in showGesture(model.doubleTap(at: Double(fraction))) },
-                    onSeekChanged: { _ in }, onSeekEnded: { _ in }, allowsHorizontalSeek: false,
-                    onHoldBegan: { model.beginBoost() }, onHoldEnded: { model.endBoost() }
-                )
-                .ignoresSafeArea()
-                .accessibilityElement()
-                .accessibilityLabel("视频画面")
-                .accessibilityAction(named: "播放或暂停") { model.togglePlayback() }
-                .accessibilityAction(named: "前进 10 秒") { model.skip(by: 10) }
-                .accessibilityAction(named: "后退 10 秒") { model.skip(by: -10) }
+                screenGestures.ignoresSafeArea()
             }
 
             switch model.phase {
@@ -67,7 +57,7 @@ struct PlayerView: View {
                     .padding(16).background(.black.opacity(0.5), in: Capsule())
                     .allowsHitTesting(false)
             }
-            if controlsVisible {
+            if controlsVisible || screenScrubOrigin != nil {
                 chrome
                     .transition(.opacity)
             }
@@ -85,7 +75,10 @@ struct PlayerView: View {
             session.appear()
             session.onPiPStarted = { dismiss() }
         }
-        .onChange(of: scenePhase) { _, phase in model.setActive(phase == .active) }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { screenScrubOrigin = nil }
+            model.setActive(phase == .active)
+        }
         .onDisappear {
             orientation.restore()
             session.disappear(keepPlayback: preserveOnExit)
@@ -94,6 +87,44 @@ struct PlayerView: View {
         .onChange(of: model.isPlaying) { _, playing in
             guard playing else { return }
             withAnimation(.easeInOut(duration: 0.2)) { controlsVisible = false }
+        }
+    }
+
+    private var screenGestures: some View {
+        GeometryReader { geometry in
+            let timeForDrag: (CGFloat, Double) -> Double = { dx, origin in
+                origin + Double(dx / max(1, geometry.size.width)) * model.duration
+            }
+            MediaGestureOverlay(
+                onTap: { withAnimation(.easeInOut(duration: 0.18)) { controlsVisible.toggle() } },
+                onDoubleTap: { fraction in showGesture(model.doubleTap(at: Double(fraction))) },
+                onSeekChanged: { dx in
+                    if let origin = screenScrubOrigin { model.previewSeek(timeForDrag(dx, origin)) }
+                },
+                onSeekEnded: { dx in
+                    guard let origin = screenScrubOrigin else { return }
+                    screenScrubOrigin = nil
+                    model.endScrubbing(at: timeForDrag(dx, origin))
+                },
+                allowsHorizontalSeek: session.allowsScreenScrubbing && model.phase == .ready && model.duration > 0,
+                onSeekBegan: {
+                    guard !model.isScrubbing else { return }
+                    screenScrubOrigin = model.currentTime
+                    model.beginScrubbing()
+                    model.previewSeek(model.currentTime)
+                },
+                onSeekCancelled: {
+                    guard screenScrubOrigin != nil else { return }
+                    screenScrubOrigin = nil
+                    model.cancelScrubbing()
+                },
+                onHoldBegan: { model.beginBoost() }, onHoldEnded: { model.endBoost() }
+            )
+            .accessibilityElement()
+            .accessibilityLabel("视频画面")
+            .accessibilityAction(named: "播放或暂停") { model.togglePlayback() }
+            .accessibilityAction(named: "前进 10 秒") { model.skip(by: 10) }
+            .accessibilityAction(named: "后退 10 秒") { model.skip(by: -10) }
         }
     }
 
@@ -186,7 +217,7 @@ struct PlayerView: View {
         playerIcon("heart", label: "记一次高潮") { Task { await recordClimax() } }
             .disabled(feedbackBusy)
         playerIcon("pip.enter", label: "小窗播放") { session.startPiP() }
-            .opacity(session.pipPossible ? 1 : 0.45)
+            .opacity(session.canStartPiP ? 1 : 0.45)
         playerIcon(orientation.landscape ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
                    label: orientation.landscape ? "返回竖屏" : "横屏全屏") {
             model.endBoost()

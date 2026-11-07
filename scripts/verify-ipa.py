@@ -15,6 +15,8 @@ APP = "PeachTest.app"
 EXECUTABLE = "PeachTest"
 BUNDLE_ID = "com.axcz1.peachios.test"
 DISPLAY_NAME = "Peach Test"
+VLC_FRAMEWORK = "VLCKit"
+VLC_RELEASE = "VLCKit 4.0.0a25"
 
 
 def require(condition, message):
@@ -49,14 +51,16 @@ def main():
         require("UILaunchScreen" in plist, "launch screen")
         require(plist.get("CFBundleShortVersionString") == "1.0.0", "marketing version")
         require(str(plist.get("CFBundleVersion", "")).isdigit(), "numeric build version")
+        require("audio" in plist.get("UIBackgroundModes", []), "background playback for Picture in Picture")
         require(root + "Assets.car" in names, "compiled app assets")
         notices = archive.read(root + "ThirdPartyNotices.txt").decode("utf-8")
-        require("MobileVLCKit 3.7.3" in notices and "GNU LESSER GENERAL PUBLIC LICENSE" in notices,
+        require(VLC_RELEASE in notices and "GNU LESSER GENERAL PUBLIC LICENSE" in notices,
                 "VLC third-party notices")
-        framework_root = root + "Frameworks/MobileVLCKit.framework/"
+        framework_root = root + f"Frameworks/{VLC_FRAMEWORK}.framework/"
         vlc_plist = plistlib.loads(archive.read(framework_root + "Info.plist"))
-        require(vlc_plist.get("CFBundleExecutable") == "MobileVLCKit", "VLC framework executable")
-        vlc = archive.read(framework_root + "MobileVLCKit")
+        require(vlc_plist.get("CFBundleExecutable") == VLC_FRAMEWORK, "VLC framework executable")
+        vlc = archive.read(framework_root + VLC_FRAMEWORK)
+        require(b"VLCSampleBufferDisplayView" in vlc, "VLC sample buffer renderer for Picture in Picture")
         require(not any("/_CodeSignature/" in name or name.endswith("embedded.mobileprovision") for name in names),
                 "must be unsigned without a provisioning profile")
         info = archive.getinfo(root + EXECUTABLE)
@@ -72,10 +76,10 @@ def main():
         build_info = tool("xcrun", "vtool", "-show-build", str(path))
         require(re.findall(r"\bplatform\s+([A-Z]+)\b", build_info) == ["IOS"], "Mach-O platform must be iOS")
         require(re.search(r"minos\s+17\.0\b", build_info) is not None, "Mach-O deployment version")
-        require("@rpath/MobileVLCKit.framework/MobileVLCKit" in tool("xcrun", "otool", "-L", str(path)),
+        require(f"@rpath/{VLC_FRAMEWORK}.framework/{VLC_FRAMEWORK}" in tool("xcrun", "otool", "-L", str(path)),
                 "app must link the embedded decoder")
         require("@executable_path/Frameworks" in load_commands, "app framework run path")
-        framework = Path(temporary) / "MobileVLCKit"
+        framework = Path(temporary) / VLC_FRAMEWORK
         framework.write_bytes(vlc)
         require(tool("xcrun", "lipo", "-archs", str(framework)).split() == ["arm64"], "VLC device ARM64 slice")
         vlc_commands = tool("xcrun", "otool", "-l", str(framework))
@@ -95,7 +99,7 @@ def main():
         "build": plist["CFBundleVersion"],
         "minimum_ios": plist["MinimumOSVersion"],
         "architectures": "arm64",
-        "local_decoder": "MobileVLCKit 3.7.3",
+        "local_decoder": VLC_RELEASE,
         "signed": False,
         "device_installation": "pending user validation",
     }, indent=2))

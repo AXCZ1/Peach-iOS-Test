@@ -136,7 +136,7 @@ struct VideoWallView: View {
             Spacer()
             HStack {
                 icon("play.fill", "播放") {
-                    let session = PlayerPresentation(api: api, item: item)
+                    let session = PlayerPresentation(api: api, item: item, allowsScreenScrubbing: false)
                     session.controller.setMuted(preferences.wallMuted)
                     playback = session
                 }

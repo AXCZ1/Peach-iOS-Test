@@ -1,8 +1,8 @@
-MobileVLCKit 3.7.3
+VLCKit 4.0.0a25
 Copyright (C) 2007-2026 VideoLAN and VLC authors
-Source: https://github.com/videolan/vlckit/tree/3.7.3
-Binary: https://download.videolan.org/pub/cocoapods/prod/MobileVLCKit-3.7.3-319ed2c0-79128878.tar.xz
-SHA-256: 0d04059906962ddc9a7bd1ebaa12e1f9ae85eb2466116a97a2f46886dd27a0a9
+Source: https://github.com/videolan/vlckit/tree/4.0.0-a25
+Binary: https://download.videolan.org/cocoapods/unstable/VLCKit-4.0-20260929-1631.zip
+SHA-256: f37c8dbdd4427d1a3f5d75dc4b8bd1ae863cef4426f9a405a2fd1c5c9012f1fb
 License: GNU Lesser General Public License, version 2.1 (full text follows).
 
                   GNU LESSER GENERAL PUBLIC LICENSE
