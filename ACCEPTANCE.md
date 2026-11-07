@@ -1,3 +1,15 @@
+# Peach iOS Test — 构建 23 验收
+
+安装包：[Peach-iOS-Test-unsigned.23.ipa](C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.23.ipa)，20,910,770 字节，无签名 iPhone ARM64，iOS 17.0+。SHA256 `7a52640fc08e05f4e80c953600e58d2ef06c1ec700602405ee443529d89b92b5`。源码 `1295a997a54de644859dac3e61129be533512b7c`；Codemagic `6aef7ac245a3d9dc5191530e`。校验和日志见 `artifacts/codemagic-23/`。
+
+- `PlayerView.swift`：普通播放器中，同一横拖距离对应的时间偏移减半，拖动预览和松手跳转一致。进度条、沉浸模式、播放墙和小窗沿用既有行为。
+- `PreviewFilmstrip.swift`：详情条按原采样时间逐张加载可见原画，先读既有缓存；点开直接放大已显示的同一帧。大图视频预览和播放进度条缩略图未改。
+- Codemagic Debug/Release 各 49 通过、3 跳过，涵盖原尺寸帧读取与拖动后播放状态恢复；iPhone Release 编译及本机 IPA 校验通过。
+
+真机待验收：同一部片横拖约五分之一屏宽，目标应移动约十分之一片长；播放墙仍只用原进度条。滚到详情预览条并横滑，确认点开前已出原图，点开可直接缩放。构建 22 保留回退。
+
+---
+
 # Peach iOS Test — 构建 22 验收
 
 安装包：[Peach-iOS-Test-unsigned.22.ipa](C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.22.ipa)，20,899,961 字节，无签名 iPhone ARM64，iOS 17.0+。SHA256 `1148d4fb611c49420591f09099e2b639be2f249ef1797f59161336a8df281d4a`。源码 `4c4644f9a1bdf3766992f923cb86a07eef23c4fd`；Codemagic `6aef74cea3dc1d99849ebb15`。本机校验与云端日志见 `artifacts/codemagic-22/`。

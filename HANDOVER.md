@@ -1,5 +1,12 @@
 # 当前继续点（2026-11-08）
 
+独立 App **构建 23** 已校验并放入 Downloads，待 iPhone 验收。普通播放横拖跨度减半，详情页预览条直接显示可见帧的原图，点开复用；播放墙、沉浸和小窗保持构建 22 的行为。
+
+- IPA：C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.23.ipa；源码 `1295a997a54de644859dac3e61129be533512b7c`，Codemagic `6aef7ac245a3d9dc5191530e`。校验和真机步骤见 ACCEPTANCE.md 首节。
+- 保留构建 22 回退。
+
+## 构建 22 历史
+
 独立 App **构建 22** 已校验并放入 Downloads。VLCKit 4.0.0a25 的画面可以接入系统小窗；普通播放左右拖动画面预览并调整进度，播放墙及从墙打开的全屏保持原手势。正式播放仍由 iPhone 解码 Peach 原文件。
 
 - IPA：C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.22.ipa；20,899,961 字节；SHA256 `1148d4fb611c49420591f09099e2b639be2f249ef1797f59161336a8df281d4a`。
