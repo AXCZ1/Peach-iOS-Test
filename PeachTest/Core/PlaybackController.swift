@@ -31,6 +31,10 @@ final class PlaybackController: ObservableObject {
     @Published private(set) var isPiPActive = false
     private var foregroundActive = false
     private let previewOnly: Bool
+    private let prefersOriginal: Bool
+    private var originalUnavailable = false
+    private var requestedPlannedStream = false
+    private var fallbackTask: Task<Void, Never>?
     private var previewHop: Task<Void, Never>?
     private var cachedPreview: CachedPreviewAsset?
 
@@ -56,10 +60,12 @@ final class PlaybackController: ObservableObject {
     private var lastActivityAt = Date.distantPast
     private var pendingResume: Double?
     private var endObserver: NSObjectProtocol?
+    private var failedToEndObserver: NSObjectProtocol?
     private var didEnd = false
 
-    init(api: PeachAPI, item: PeachItem, previewOnly: Bool = false) {
+    init(api: PeachAPI, item: PeachItem, previewOnly: Bool = false, preferOriginal: Bool = false) {
         self.previewOnly = previewOnly
+        self.prefersOriginal = preferOriginal && ["mp4", "m4v", "mov"].contains((item.name as NSString).pathExtension.lowercased())
         self.api = api
         self.item = item
     }
@@ -89,38 +95,63 @@ final class PlaybackController: ObservableObject {
                 pendingResume = item.resumeTime
             }
         }
-        let requestedSession = sessionID
+        await prepareStream(for: sessionID)
+    }
+
+    private func canInstallStream(for requestedSession: String) -> Bool {
+        requestedSession == sessionID && !stopped && intent.isActive && !Task.isCancelled
+    }
+
+    private func prepareStream(for requestedSession: String) async {
+        guard canInstallStream(for: requestedSession) else { return }
         do {
+            if prefersOriginal, !originalUnavailable {
+                do {
+                    let source = try await api.originalPlaybackURL(id: item.id)
+                    guard canInstallStream(for: requestedSession) else { return }
+                    install(AVURLAsset(url: source), note: "原文件直放", original: true)
+                    return
+                } catch let error as PeachAPIError where error.status == 404 || error.status == 405 {
+                    // Older Peach versions may not provide an original-file ticket.
+                    guard canInstallStream(for: requestedSession) else { return }
+                    originalUnavailable = true
+                }
+            }
+            requestedPlannedStream = true
             let plan = try await api.streamPlan(id: item.id, sessionID: requestedSession)
-            guard requestedSession == sessionID, !stopped, intent.isActive, !Task.isCancelled else { return }
+            guard canInstallStream(for: requestedSession) else { return }
             let source = try api.playbackURL(plan: plan, id: item.id, sessionID: requestedSession)
-            formatNote = plan.protocolName == "hls" ? "HLS 自适应分片" : "原始 MP4 流"
             let cookies = HTTPCookieStorage.shared.cookies(for: source) ?? []
             var asset = AVURLAsset(url: source, options: ["AVURLAssetHTTPCookiesKey": cookies])
             if previewOnly, plan.protocolName == "range", plan.mimeType == "video/mp4",
                let cached = try? await PreviewRangeSource.open(origin: api.baseURL, identity: item.mediaCacheIdentity, fetch: { [api] range, version in
                    try await api.previewBytes(from: source, range: range, validator: version)
                }) {
-                guard requestedSession == sessionID, !stopped, intent.isActive, !Task.isCancelled else { return }
+                guard canInstallStream(for: requestedSession) else { return }
                 let preview = CachedPreviewAsset(source: cached)
                 cachedPreview = preview
                 asset = preview.asset
             }
-            guard requestedSession == sessionID, !stopped, intent.isActive, !Task.isCancelled else { return }
-            let playerItem = AVPlayerItem(asset: asset)
-            playerItem.preferredForwardBufferDuration = previewOnly ? 2 : 8
-            let player = AVPlayer(playerItem: playerItem)
-            player.automaticallyWaitsToMinimizeStalling = !previewOnly
-            player.allowsExternalPlayback = true
-            self.player = player
-            observe(player, item: playerItem)
-            player.isMuted = isMuted
-            if !previewOnly { applyPlaybackIntent() }
-            startTicker()
+            guard canInstallStream(for: requestedSession) else { return }
+            install(asset, note: plan.protocolName == "hls" ? "HLS 自适应分片" : "原始 MP4 流")
         } catch {
             guard requestedSession == sessionID, !stopped, !Task.isCancelled else { return }
             phase = .failed(error.localizedDescription)
         }
+    }
+
+    private func install(_ asset: AVURLAsset, note: String, original: Bool = false) {
+        let playerItem = AVPlayerItem(asset: asset)
+        if !original { playerItem.preferredForwardBufferDuration = previewOnly ? 2 : 8 }
+        let player = AVPlayer(playerItem: playerItem)
+        player.automaticallyWaitsToMinimizeStalling = !previewOnly
+        player.allowsExternalPlayback = true
+        formatNote = note
+        self.player = player
+        observe(player, item: playerItem, original: original)
+        player.isMuted = isMuted
+        if !previewOnly { applyPlaybackIntent() }
+        startTicker()
     }
 
     func togglePlayback() {
@@ -156,7 +187,7 @@ final class PlaybackController: ObservableObject {
             // A pending plan must not survive a page switch. Its late result is
             // rejected by session identity, including a quick return to this page.
             if started, player == nil, !stopped {
-                api.cancelStream(sessionID: sessionID)
+                cancelPreparation()
                 sessionID = UUID().uuidString.replacingOccurrences(of: "-", with: "")
                 started = false
             }
@@ -285,8 +316,17 @@ final class PlaybackController: ObservableObject {
         player?.pause()
         player?.replaceCurrentItem(with: nil)
         cachedPreview?.cancel(); cachedPreview = nil
-        api.cancelStream(sessionID: sessionID)
+        cancelPreparation()
         player = nil
+    }
+
+    private func cancelPreparation() {
+        fallbackTask?.cancel()
+        fallbackTask = nil
+        if requestedPlannedStream {
+            api.cancelStream(sessionID: sessionID)
+            requestedPlannedStream = false
+        }
     }
 
     private func startTicker() {
@@ -337,7 +377,7 @@ final class PlaybackController: ObservableObject {
         if !ended { PlayerMemory.shared.save(position, for: item.id) }
     }
 
-    private func observe(_ player: AVPlayer, item playerItem: AVPlayerItem) {
+    private func observe(_ player: AVPlayer, item playerItem: AVPlayerItem, original: Bool) {
         itemStatus = playerItem.observe(\.status, options: [.new, .initial]) { [weak self] item, _ in
             Task { @MainActor in
                 guard let self, !self.stopped, self.player === player else { return }
@@ -349,7 +389,7 @@ final class PlaybackController: ObservableObject {
                     if self.previewOnly { self.startPreviewHops() }
                     else { self.restorePositionIfNeeded(player) }
                 case .failed:
-                    self.phase = .failed(Self.describe(item.error))
+                    self.handleFailure(item.error, player: player, item: item, original: original)
                 default: break
                 }
             }
@@ -358,7 +398,7 @@ final class PlaybackController: ObservableObject {
             guard let error = item.error else { return }
             Task { @MainActor in
                 guard let self, !self.stopped, self.player === player else { return }
-                self.phase = .failed(Self.describe(error))
+                self.handleFailure(error, player: player, item: item, original: original)
             }
         }
         timeControlStatus = player.observe(\.timeControlStatus, options: [.new, .initial]) { [weak self] player, _ in
@@ -403,11 +443,59 @@ final class PlaybackController: ObservableObject {
                 self.onEnded?()
             }
         }
+        if original {
+            failedToEndObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemFailedToPlayToEndTime, object: playerItem, queue: .main) { [weak self] notification in
+                let error = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? NSError
+                Task { @MainActor in
+                    guard let self, !self.stopped, self.player === player else { return }
+                    self.handleFailure(error ?? playerItem.error, player: player, item: playerItem, original: true)
+                }
+            }
+        }
         stallTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(45))
             guard let self, !Task.isCancelled, !self.stopped, self.player === player, self.phase == .preparing else { return }
             self.phase = .failed("播放源长时间没有响应。请检查网络与 Peach 服务地址。")
         }
+    }
+
+    private func handleFailure(_ error: Error?, player: AVPlayer, item: AVPlayerItem, original: Bool) {
+        // Transport/auth failures should not start an expensive transcode.
+        guard original, Self.isFormatFailure(error),
+              item.errorLog()?.events.contains(where: { (400...599).contains($0.errorStatusCode) }) != true else {
+            phase = .failed(Self.describe(error))
+            return
+        }
+        originalUnavailable = true
+        pendingResume = pendingResume ?? currentTime
+        removeObservers()
+        player.pause()
+        player.replaceCurrentItem(with: nil)
+        self.player = nil
+        isPlaying = false
+        buffered = 0
+        lastTick = nil
+        phase = .preparing
+        if intent.isActive {
+            let requestedSession = sessionID
+            fallbackTask = Task { [weak self] in await self?.prepareStream(for: requestedSession) }
+        } else {
+            started = false
+        }
+    }
+
+    private static func isFormatFailure(_ error: Error?) -> Bool {
+        let formatCodes: [AVError.Code] = [.decodeFailed, .invalidSourceMedia, .fileFormatNotRecognized, .fileFailedToParse, .decoderNotFound]
+        var cause = error.map { $0 as NSError }
+        var failedToDecode = false
+        while let current = cause {
+            if current.domain == NSURLErrorDomain { return false }
+            if current.domain == AVFoundationErrorDomain, formatCodes.contains(where: { $0.rawValue == current.code }) {
+                failedToDecode = true
+            }
+            cause = current.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+        return failedToDecode
     }
 
     private func startPreviewHops() {
@@ -459,6 +547,8 @@ final class PlaybackController: ObservableObject {
         ticker = nil
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         endObserver = nil
+        if let failedToEndObserver { NotificationCenter.default.removeObserver(failedToEndObserver) }
+        failedToEndObserver = nil
     }
 
     private static func describe(_ error: Error?) -> String {

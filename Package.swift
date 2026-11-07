@@ -16,7 +16,8 @@ let package = Package(
         .testTarget(
             name: "PeachTestCoreTests",
             dependencies: ["PeachTestCore"],
-            path: "PeachTestTests"
+            path: "PeachTestTests",
+            resources: [.copy("Fixtures")]
         )
     ]
 )

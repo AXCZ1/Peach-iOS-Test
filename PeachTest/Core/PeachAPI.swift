@@ -337,6 +337,19 @@ final class PeachAPI: @unchecked Sendable {
 
     // MARK: - Writes
 
+    /// Peach's external-player ticket gives AVPlayer the original Range stream.
+    func originalPlaybackURL(id: Int) async throws -> URL {
+        struct Ticket: Decodable { let url: String }
+        let ticket: Ticket = try await post("/api/external-playback", query: [
+            URLQueryItem(name: "id", value: String(id))
+        ], body: [:])
+        guard let source = URL(string: ticket.url, relativeTo: baseURL)?.absoluteURL,
+              Self.sameOrigin(source, baseURL), source.path == "/external-stream/\(id)" else {
+            throw PeachAPIError(message: "原文件播放地址与当前 Peach 服务不一致")
+        }
+        return source
+    }
+
     func streamPlan(id: Int, sessionID: String) async throws -> StreamPlan {
         try await get("/api/stream-plan", query: [
             URLQueryItem(name: "id", value: String(id)),
@@ -475,8 +488,8 @@ final class PeachAPI: @unchecked Sendable {
         return try decoder.decode(T.self, from: data)
     }
 
-    private func post<T: Decodable>(_ path: String, body: [String: Any]) async throws -> T {
-        var request = URLRequest(url: url(path: path))
+    private func post<T: Decodable>(_ path: String, query: [URLQueryItem] = [], body: [String: Any]) async throws -> T {
+        var request = URLRequest(url: url(path: path, query: query))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")

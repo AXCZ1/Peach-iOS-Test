@@ -273,7 +273,7 @@ private struct ImmersivePage: View {
         _controlsVisible = controlsVisible
         self.onEnded = onEnded; self.onOpenDetail = onOpenDetail
         self.onFeedback = onFeedback; self.onAdvance = onAdvance
-        let controller = PlaybackController(api: api, item: item)
+        let controller = PlaybackController(api: api, item: item, preferOriginal: true)
         _controller = StateObject(wrappedValue: controller)
         _presentation = StateObject(wrappedValue: PlayerPresentation(api: api, item: item, controller: controller))
     }

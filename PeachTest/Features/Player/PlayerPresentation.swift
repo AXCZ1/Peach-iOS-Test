@@ -32,7 +32,7 @@ final class PlayerPresentation: NSObject, ObservableObject, Identifiable, AVPict
 
     init(api: PeachAPI, item: PeachItem, controller: PlaybackController? = nil) {
         self.api = api; self.item = item
-        self.controller = controller ?? PlaybackController(api: api, item: item)
+        self.controller = controller ?? PlaybackController(api: api, item: item, preferOriginal: true)
         super.init()
         surface.playerLayer.videoGravity = .resizeAspect
         if AVPictureInPictureController.isPictureInPictureSupported() {
