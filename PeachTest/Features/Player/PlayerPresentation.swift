@@ -200,7 +200,7 @@ extension PlayerPresentation: AVPictureInPictureSampleBufferPlaybackDelegate {
     }
 
     func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController,
-                                    skipByInterval skipInterval: CMTime, completionHandler: @escaping () -> Void) {
+                                    skipByInterval skipInterval: CMTime, completion completionHandler: @escaping @Sendable () -> Void) {
         let interval = skipInterval.seconds
         guard interval.isFinite else { completionHandler(); return }
         controller.seek(to: controller.currentTime + interval) { [weak pictureInPictureController] in
