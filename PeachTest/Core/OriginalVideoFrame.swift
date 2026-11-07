@@ -72,6 +72,7 @@ final class OriginalFrameReader {
             #endif
         }
         #if os(iOS) && !SWIFT_PACKAGE
+        guard let vlc else { throw PeachAPIError(message: "iPhone 无法打开原文件取帧") }
         return try await vlc.capture(at: seconds)
         #else
         throw PeachAPIError(message: "此设备没有可读取该原文件的取帧解码器")

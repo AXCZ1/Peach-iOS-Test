@@ -218,9 +218,10 @@ final class VLCOriginalFrameDecoder: NSObject, VLCMediaThumbnailerDelegate {
     private var thumbnailer: VLCMediaThumbnailer?
     private var continuation: CheckedContinuation<CGImage, Error>?
 
-    init(url: URL, width: Int?, height: Int?) {
+    init?(url: URL, width: Int?, height: Int?) {
         _ = VLCOriginalPlayer.installLogSink
-        media = VLCMedia(url: url)
+        guard let media = VLCMedia(url: url) else { return nil }
+        self.media = media
         if let width, let height, width > 0, height > 0 {
             size = CGSize(width: width, height: height)
         }
@@ -261,7 +262,7 @@ final class VLCOriginalFrameDecoder: NSObject, VLCMediaThumbnailerDelegate {
     private func originalSize() async throws -> CGSize {
         if let size { return size }
         let parser = VLCMediaParser(library: VLCLibrary.shared(), timeout: 8_000)
-        guard parser.queueMedia(media, options: VLCMediaParsingOptions(rawValue: 1)) == 0 else {
+        guard parser.queue(media, options: VLCMediaParsingOptions(rawValue: 1)) == 0 else {
             throw PeachAPIError(message: "无法读取原文件的分辨率")
         }
         defer { parser.cancelAllParsing() }
