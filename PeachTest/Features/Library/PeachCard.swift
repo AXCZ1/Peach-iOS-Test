@@ -5,6 +5,7 @@ struct PeachCard: View {
     let api: PeachAPI
     var density: PeachDensity = .big
     var portrait = false
+    var previewing = false
 
     private var coverURL: URL? {
         guard item.hasCover else { return nil }
@@ -26,6 +27,10 @@ struct PeachCard: View {
             ZStack(alignment: .bottomTrailing) {
                 CoverPoster(item: item, api: api)
                     .aspectRatio(3.0 / 4.0, contentMode: .fit)
+                    .overlay { if previewing { DwellVideoPreview(item: item, api: api) } }
+                    .background(GeometryReader { geometry in
+                        Color.clear.preference(key: PreviewBoundsKey.self, value: [item.id: geometry.frame(in: .named("libraryViewport"))])
+                    })
                     .clipShape(RoundedRectangle(cornerRadius: 14))
                 Text(item.durationText)
                     .font(.caption.monospacedDigit().weight(.semibold))

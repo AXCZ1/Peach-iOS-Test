@@ -254,6 +254,10 @@ private struct ImmersivePage: View {
     let onAdvance: (Int) -> Void
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var controller: PlaybackController
+    @StateObject private var presentation: PlayerPresentation
+    @Environment(\.dismiss) private var dismiss
+    @State private var expanded = false
+    @State private var expandedMode = PlayerDisplayMode.fullscreen
     @State private var detail: PeachItem?
     @State private var busy = false
     @State private var localCount: Int?
@@ -268,7 +272,9 @@ private struct ImmersivePage: View {
         _controlsVisible = controlsVisible
         self.onEnded = onEnded; self.onOpenDetail = onOpenDetail
         self.onFeedback = onFeedback; self.onAdvance = onAdvance
-        _controller = StateObject(wrappedValue: PlaybackController(api: api, item: item))
+        let controller = PlaybackController(api: api, item: item)
+        _controller = StateObject(wrappedValue: controller)
+        _presentation = StateObject(wrappedValue: PlayerPresentation(api: api, item: item, controller: controller))
     }
 
     private var current: PeachItem { detail ?? item }
@@ -277,14 +283,14 @@ private struct ImmersivePage: View {
         if !names.isEmpty { return names + (current.performers.count > 3 ? " 等 \(current.performers.count) 人" : "") }
         return current.creator ?? current.studio ?? "未归属"
     }
-    private var playbackActive: Bool { isActive && scenePhase == .active }
+    private var playbackActive: Bool { isActive && scenePhase == .active && !expanded }
 
     var body: some View {
         GeometryReader { geometry in
             ZStack {
                 Color.black
-                if let player = controller.player {
-                    VideoSurface(player: player).ignoresSafeArea()
+                if controller.player != nil, !expanded {
+                    SessionVideoSurface(session: presentation).ignoresSafeArea()
                 } else if !isActive {
                     RemoteImage(url: api.coverURL(code: current.coverKey.isEmpty ? current.displayNumber : current.coverKey))
                         .blur(radius: 12).overlay(Color.black.opacity(0.55))
@@ -300,7 +306,8 @@ private struct ImmersivePage: View {
                             controller.endScrubbing(at: seekOrigin + dx / max(geometry.size.width, 1) * controller.duration)
                         },
                         onSeekBegan: { seekOrigin = controller.currentTime; controller.beginScrubbing() },
-                        onSeekCancelled: { controller.cancelScrubbing() }
+                        onSeekCancelled: { controller.cancelScrubbing() },
+                        onHoldBegan: { controller.beginBoost() }, onHoldEnded: { controller.endBoost() }
                     )
                     .accessibilityElement().accessibilityLabel("视频画面")
                     .accessibilityAction(named: "播放或暂停") { controller.togglePlayback() }
@@ -316,6 +323,10 @@ private struct ImmersivePage: View {
                         Text(message).font(.footnote).foregroundStyle(.white.opacity(0.7))
                         Button("跳过") { onAdvance(1) }.buttonStyle(.borderedProminent).tint(PeachTheme.coral)
                     }.padding(30)
+                }
+                if controller.isBoosting {
+                    Text("2×").font(.headline.monospacedDigit()).foregroundStyle(.white)
+                        .padding(12).background(.black.opacity(0.6), in: Capsule()).allowsHitTesting(false)
                 }
                 if let gestureFeedback {
                     Text(gestureFeedback).font(.headline).foregroundStyle(.white)
@@ -345,6 +356,12 @@ private struct ImmersivePage: View {
                             }
                         }.padding(.horizontal, 20).padding(.bottom, 12)
                         if isActive {
+                            HStack(spacing: 12) {
+                                Spacer()
+                                modeButton("rectangle.expand.vertical", "影院模式") { expandedMode = .theater; expanded = true }
+                                modeButton("pip.enter", "小窗") { presentation.startPiP() }
+                                modeButton("arrow.up.left.and.arrow.down.right", "全屏") { expandedMode = .fullscreen; expanded = true }
+                            }.padding(.horizontal, 16)
                             PlaybackSeekBar(controller: controller, api: api, item: current)
                                 .padding(.horizontal, 20).padding(.bottom, 16)
                         }
@@ -354,18 +371,31 @@ private struct ImmersivePage: View {
         }
         .task(id: playbackActive) {
             guard playbackActive else { return }
+            presentation.appear()
+            presentation.onPiPStarted = { dismiss() }
             controller.onEnded = onEnded
             await controller.activate()
         }
-        .onChange(of: playbackActive) { _, active in controller.setActive(active) }
+        .onChange(of: playbackActive) { _, active in if !expanded { controller.setActive(active) } }
         .onChange(of: controller.isPlaying) { _, playing in
             if playing { controlsVisible = false }
         }
         .onChange(of: item.oCount) { _, count in localCount = count }
-        .onDisappear { controller.stop() }
+        .onDisappear { if !expanded { presentation.disappear() } }
+        .fullScreenCover(isPresented: $expanded, onDismiss: {
+            if controller.isPiPActive { dismiss(); return }
+            presentation.appear(); presentation.onPiPStarted = { dismiss() }
+            if isActive { Task { await controller.activate() } }
+        }) { PlayerView(session: presentation, preserveOnExit: true, initialMode: expandedMode) }
+        .onChange(of: presentation.message) { _, message in if let message { showGesture(message) } }
         .task(id: item.id) {
             if let fresh = try? await api.item(id: item.id), !Task.isCancelled { detail = fresh }
         }
+    }
+
+    private func modeButton(_ name: String, _ label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) { Image(systemName: name).frame(width: 44, height: 44).foregroundStyle(.white) }
+            .buttonStyle(.plain).accessibilityLabel(label)
     }
 
     private func showGesture(_ message: String) {

@@ -127,6 +127,7 @@ struct TimelineMetadata: Decodable, Sendable {
     let rows: Int?
     let source: String?
     let cues: [[Double]]?
+    let timestamps: [Double]?
     // A class permits Peach's optional nested fallback without recursive value storage.
     let fallback: TimelineFallback?
 
@@ -172,5 +173,18 @@ struct TimelineTile: Equatable, Sendable {
         let fraction = duration > 0 ? min(1, max(0, time / duration)) : 0
         let cell = min(8, Int(fraction * 9))
         return ImageRegion(x: Double(cell % 3) / 3, y: Double(cell / 3) / 3, width: 1 / 3, height: 1 / 3)
+    }
+}
+
+/// Matches Peach 0.52.0 card-art/hover.ts local-video preview positions.
+enum PreviewPlayback {
+    static let positions: [Double] = [0.08, 0.22, 0.36, 0.5, 0.64, 0.78, 0.9]
+}
+
+enum DwellSelection {
+    static func candidate(bounds: [Int: CGRect], viewport: CGRect) -> Int? {
+        bounds.filter { _, frame in
+            frame.width > 0 && frame.height > 0 && frame.intersection(viewport).height / min(frame.height, viewport.height) >= 0.65
+        }.min { abs($0.value.midY - viewport.midY) < abs($1.value.midY - viewport.midY) }?.key
     }
 }

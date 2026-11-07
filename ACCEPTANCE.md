@@ -1,48 +1,49 @@
-# Peach iOS Test — 修复版验收
+# Peach iOS Test — 视频预览与播放墙验收
 
-更新：2026-11-07。构建 **9** 已完成编译、打包、下载及本地校验；构建 8 保留作回退。构建 9 的真机验收尚未进行。
+更新：2026-11-07。本轮实现及本地检查已完成，准备手动 Codemagic 构建，尚未作 iPhone 真机验收。构建 9 保留回退，NAS 82 不变。
 
-- 安装包：[Peach-iOS-Test-unsigned.9.ipa](C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.9.ipa)，1,284,041 字节。
-- SHA256：`e7d6c34268f802d3f5b53ab037ba0d744fd33ef068731d5b417fd2599f0dd687`。
-- 源码提交：`80075b14988034803363dff9f03cde8047f6e2d4`；Codemagic 构建 ID：`6aee0c4c52103eb5dbe40626`。
-- 证据目录：`artifacts/codemagic-9/`，含完整编译步骤日志、云端 IPA 校验及本地下载校验。
-
-Bundle ID `com.axcz1.peachios.test`，显示名 `Peach Test`，最低 iOS 17.0。与 NAS 构建 82 分开安装，尚未接入 NAS iOS。
+Bundle ID `com.axcz1.peachios.test`，显示名 `Peach Test`，最低 iOS 17.0，独立测试版。
 
 ## 本轮修改
 
-- 修复详情重复撤销、非活动页迟到起播、沉浸无撤销、手动翻页不续载、准备完成误记观看次数。
-- 修复索引图片及资料的 kind 参数；真实无数据与读取失败分别显示。
-- 馆藏大图使用 3:4 正封裁切，补全演员头像、日期、大小和标签；显示精确到秒的时长。
-- 普通与沉浸播放采用相同双击分区：左 25% 后退 10 秒，中央 50% 播放/暂停，右 25% 前进 10 秒。单击显隐，去掉中央三个控制按钮。
-- 拖动时读取已有时间轴或九宫格显示缩略图；不重新生成、不修改源视频。暂停状态下拖动后仍保持暂停。
+- 大图停留 3 秒后，封面位置播放静音原视频短片段，原版七个采样位置每 1.4 秒循环；保持竖卡尺寸，视频按原比例留黑边。滚动、切页、开详情、退后台停止并恢复封面，不写观看次数、活动及续播。用户录屏 12–20 秒是此行为，不是截图轮播。
+- 每片 30 张截图：详情“记一次高潮”下方单行横向滚动，点图查看大图；进度条共用时间轴缓存。截图与卡片视频预览分开。
+- 筛选仅一条横向滚动行，“换一批”固定最右；保留搜索、排序、小图和库切换。
+- 普通/沉浸/播放墙长按 2×，松开、取消、拖进度、离开恢复；普通/沉浸原双击分区和单击显隐保留。
+- 播放器增加影院、记录、画中画、全屏图标。影院扩展播放器并收起图库，全屏隐藏详情；共用当前播放器，PiP 保留会话并支持恢复。
+- 播放墙采用 Peach 0.52.0 原 4 套 12 格模板及聚焦重排，二维平移、惯性、锚点缩放；筛选时有限集合，无筛选时探索续页后循环，保留图片/声音/详情/稍后看。
 
-## 已有证据
+## 已验证与边界
 
-- 本地 WSL Swift 6.1.3：27 项测试通过，包括真实隔离 Peach 的索引/图片/封面字段读取，以及计数 5→6→5；连续消费同一撤销操作只发送一次。测试后隔离影片计数恢复原值。
-- Codemagic Mac 主机 Debug/Release 各 29 项：27 项通过、2 项真实局域网接口测试因云端未提供凭据而跳过，0 失败；这 2 项已在本地真实隔离实例通过。
-- 新增 Mac 主机测试调用实际 PlaybackController，检查打开详情及退出后迟到计划不能创建播放器，两项均通过。
-- 无签名 iPhone ARM64 Release 编译通过；云端校验 IPA 结构、Bundle ID、版本、iOS 17.0、arm64 及无签名；本地重新验证 ZIP、Info.plist、Mach-O 和 SHA256 后复制到 Downloads。
-- 两部示例片的 /thumb 为已有 1440×810 九宫格，/api/timeline 为空；按浏览器九段映射选图。密集时间轴分片/外部 cues/缺省数据路径有核心测试。
-- NAS 构建 82 基线 SHA256：FA01E9F509B5C269EDFF888FB872AE44624F050EB0BB16D799E8453D9C9E12E4，19,135,903 字节。
+- 本地核心 33 项：31 通过、2 项环境接口测试跳过；这 2 项随后单独在真实隔离实例通过。新增模板重排、负坐标、有限集合、探索续页、缩放锚点、停留选片、30 帧裁切检查。
+- SwiftUI 修改文件语法解析通过；完整 iOS 编译及 Mac 播放器用例由 Codemagic 执行。语法检查不能代替编译。
+- 55 部缓存各 30 帧，元数据/JPEG 尺寸核实；示例 /api/timeline、/timeline 返回 200。
+- 原 54 部源文件大小和 mtime 与生成前一致，后来新增第 55 条已由定时任务自动补齐。
+- 生产镜像仍 longmeidao/peach:0.52.0，容器运行中。业务写接口只在隔离 peach-ios-test 回归并恢复测试计数。
+- 未运行 Simulator。真机画面、手势、PiP、MP4/MKV 和流畅度待用户实测。
+
+## 截图维护
+
+scripts/generate-previews.py 部署到 /mnt/ssd/apps/peach/data/tools/peach-ios/，每 10 分钟检查已入库本地视频。用户仍须通过 Peach 原有扫描入库；已有匹配缓存跳过，不覆盖其他生成器缓存。
+
+取 30 点：duration × (0.01 + i / 30)，i 为 0…29。2 小时影片约每 4 分钟一张，不是固定每 10 秒。使用官方抽帧函数、320 像素宽、10×3 拼图和原时间轴目录；镜像、数据库、源视频及挂载不改。失败显式记录。
+
+状态 /data/generated/timeline/.fixed30-status.json；运行日志 /data/tools/peach-ios/last-run.log。原 crontab 备份 /mnt/ssd/apps/peach/backups/fixed30-20261107/root.cron。回退只移除 peach-ios-fixed30 标记行，不恢复整份旧 crontab 覆盖其他后来任务。缓存可保留。
 
 ## iPhone 验收
 
-1. 直接更新安装新的 Peach Test，确认登录和 NAS 82 共存。
-2. 索引检查头像、厂牌 Logo、分类切换，点入演员/标签/厂牌确认仅显示关联作品。创作者为空时显示空状态。
-3. 大图对照用户图 3：竖向正封、头像与信息行；MIKR-051 显示 2:29:08。切回小图，搜索与筛选仍可用。
-4. 普通播放和沉浸分别测试横竖屏 25%/75% 分界、快速连续双击、中央双击暂停与继续、单击显隐。进度条和按钮不能误触视频手势。
-5. 拖进度条，确认预览跟随目标时间、靠边不越界、松手跳转；原本暂停时不能自动播放。两部示例是已有九宫格，预览按分段变化。
-6. 沉浸上下翻页、打开详情、立即退出和重新进入，确认没有上一页声音或迟到起播；保留横滑定位。
-7. 详情和沉浸各记录一次并连续点撤销，确认只撤回该次；记录后翻页再撤销，确认作用于原影片。此步会产生并撤回用户自己的真实记录。
-8. 回归 MP4/MKV 播放、声音、续播、播放墙聚焦、大小图选择、评分/稍后看/喜欢及返回路径。
+1. 更新 Peach Test，同 Wi-Fi 登录，与 NAS 82 共存。大图停留 3 秒播放原视频、无声音；滚动离开恢复正封，观看统计不变。
+2. 详情计数下方可横向看完 30 张图，展开/翻页/关闭正常；拖进度条预览随时间变化，暂停拖动后仍暂停。
+3. 筛选只有一行，左右滚动时换一批固定；回归搜索、标签、大小图、切库。
+4. MP4/MKV 普通/沉浸长按 2×，释放恢复；取消、切后台、拖动不残留倍速。回归双击分区、单击显隐、上下翻页。
+5. 影院/全屏不重新起播；记录及撤销只处理本次；进入小窗、后台继续、点小窗恢复、关闭均正常，无第二路声音。
+6. 播放墙平移、捏合、缩放、聚焦重排及收起恢复相机；图片、声音、播放、详情、稍后看、全屏返回回归。
+7. 索引头像、资料、精确时长、评分、喜欢、观看进度和登录回归。
 
-超过 60 条的分页状态使用 125 条测试场景检查；当前生产库 54 条，不能据此声称真机超 60 条翻页已通过。最终播放、手势与视觉结论只以真机验收为准。
+## 修改文件对应
 
-## 修改范围与构建
-
-- 核心：PeachAPI/PeachModels/MediaPresentation/PlaybackController，接口映射、预览元数据和播放状态。
-- 界面：EntityBrowseView、ItemDetailView、ImmersiveView、PlayerView、PeachCard/LibraryRootView、MediaArtwork/MediaGestureOverlay/RemoteImage。
-- Package.swift 将实际播放器纳入可用 AVFoundation 的 Mac 主机测试；Linux 条件编译跳过该部分。
-- 仅手动触发 Codemagic ios-unsigned-ipa；不启用 GitHub Actions，不运行 Simulator。未修改生产服务或源媒体。
-- 完整功能目标中的其余待实现项继续保留在 FEATURE-MATRIX.md，本轮不扩展管理写操作。
+- LibraryRootView、PeachCard、PreviewFilmstrip、MediaPresentation：停留视频、详情截图及单行筛选。
+- PlaybackController、MediaGestureOverlay、PlayerView、PlayerPresentation、ImmersiveView、PeachTestApp、Info.plist：倍速、模式、PiP 生命周期。
+- VideoWallView、WallFocusView、WallLayout、WallTemplates：原版几何、探索与聚焦。
+- generate-previews.py、import-wall-templates.py：官方兼容缓存和模板导入。
+- WallPreviewTests、PlaybackLifecycleTests：核心算法及实际播放器回归。

@@ -1,321 +1,226 @@
 import SwiftUI
 
-/// Two-dimensional cover wall. Peach's desktop layout is a zoomable Folia
-/// collage; on a phone the useful part is the same browsing unit — one block of
-/// twelve covers in a varied mosaic — laid out in a fixed three-column field,
-/// with cover/thumbnail switching, focus expansion, sound control and the same
-/// watch-later / play / detail actions as the web wall.
 struct VideoWallView: View {
     let api: PeachAPI
     let filter: LibraryFilter
-
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var preferences: Preferences
     @State private var items: [PeachItem] = []
-    @State private var selected: PeachItem?
-    @State private var state: LoadState = .loading
-    @State private var zoom: CGFloat = 1
+    @State private var camera = WallCamera()
+    @State private var savedCamera: WallCamera?
+    @State private var dragOrigin: WallCamera?
+    @State private var pinchOrigin: WallCamera?
+    @State private var viewport = CGSize.zero
+    @State private var placements: [WallPlacement] = []
+    @State private var exploration = WallExploration()
+    @State private var selectedKey: String?
+    @State private var detail: PeachItem?
+    @State private var playback: PlayerPresentation?
+    @State private var fullPlayer: PlayerPresentation?
+    @State private var busy = false
+    @State private var hasMore = true
+    @State private var offset = 0
+    @State private var error: String?
     @State private var toast: String?
-    @State private var detailItem: PeachItem?
-    @State private var playing: PeachItem?
-    @State private var muted = false
-    @State private var preview: PeachItem?
-
-    private enum LoadState: Equatable {
-        case loading
-        case ready
-        case failed(String)
-    }
-
-    private let templates: [[CGRect]] = [
-        [CGRect(x: 0, y: 0, width: 3, height: 2), CGRect(x: 3, y: 0, width: 6, height: 4),
-         CGRect(x: 9, y: 0, width: 3, height: 2), CGRect(x: 0, y: 2, width: 3, height: 2),
-         CGRect(x: 9, y: 2, width: 3, height: 4), CGRect(x: 0, y: 4, width: 4, height: 4),
-         CGRect(x: 4, y: 4, width: 2, height: 2), CGRect(x: 6, y: 4, width: 3, height: 2),
-         CGRect(x: 4, y: 6, width: 2, height: 2), CGRect(x: 6, y: 6, width: 2, height: 2),
-         CGRect(x: 8, y: 6, width: 2, height: 2), CGRect(x: 10, y: 6, width: 2, height: 2)],
-        [CGRect(x: 0, y: 0, width: 2, height: 3), CGRect(x: 2, y: 0, width: 2, height: 3),
-         CGRect(x: 4, y: 0, width: 2, height: 3), CGRect(x: 6, y: 0, width: 6, height: 4),
-         CGRect(x: 0, y: 3, width: 6, height: 2), CGRect(x: 6, y: 4, width: 2, height: 4),
-         CGRect(x: 8, y: 4, width: 2, height: 4), CGRect(x: 10, y: 4, width: 2, height: 2),
-         CGRect(x: 0, y: 5, width: 2, height: 3), CGRect(x: 2, y: 5, width: 2, height: 3),
-         CGRect(x: 4, y: 5, width: 2, height: 3), CGRect(x: 10, y: 6, width: 2, height: 2)],
-        [CGRect(x: 0, y: 0, width: 6, height: 4), CGRect(x: 6, y: 0, width: 6, height: 3),
-         CGRect(x: 6, y: 3, width: 4, height: 3), CGRect(x: 10, y: 3, width: 2, height: 2),
-         CGRect(x: 0, y: 4, width: 4, height: 2), CGRect(x: 4, y: 4, width: 2, height: 2),
-         CGRect(x: 10, y: 5, width: 2, height: 3), CGRect(x: 0, y: 6, width: 2, height: 2),
-         CGRect(x: 2, y: 6, width: 2, height: 2), CGRect(x: 4, y: 6, width: 2, height: 2),
-         CGRect(x: 6, y: 6, width: 2, height: 2), CGRect(x: 8, y: 6, width: 2, height: 2)]
-    ]
+    private var finite: Bool { filter.hasActiveFilter }
 
     var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-            switch state {
-            case .loading:
-                ProgressView().tint(PeachTheme.coral)
-            case .failed(let message):
-                VStack(spacing: 14) {
-                    Text("播放墙无法打开").font(.headline).foregroundStyle(.white)
-                    Text(message).font(.footnote).foregroundStyle(.white.opacity(0.6)).multilineTextAlignment(.center)
-                    Button("关闭") { dismiss() }.buttonStyle(.borderedProminent).tint(PeachTheme.coral)
+        GeometryReader { geometry in
+            ZStack(alignment: .topLeading) {
+                Color.black
+                ForEach(placements) { tile in
+                    if items.indices.contains(tile.index) {
+                        let item = items[tile.index]
+                        ZStack {
+                            WallArtwork(item: item, api: api, image: preferences.wallImage, ratio: tile.rect.width / tile.rect.height)
+                            if selectedKey == tile.id {
+                                if let playback {
+                                    WallFocusView(session: playback, onClose: clearSelection,
+                                                  onFullScreen: { fullPlayer = playback })
+                                } else {
+                                    focusActions(item)
+                                }
+                            } else {
+                                Text(item.displayNumber.isEmpty ? item.title : item.displayNumber)
+                                    .font(.system(size: 11, weight: .bold).monospaced()).foregroundStyle(.white)
+                                    .lineLimit(1).padding(7).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                                    .background(LinearGradient(colors: [.clear, .clear, .black.opacity(0.55)], startPoint: .top, endPoint: .bottom))
+                            }
+                        }
+                        .frame(width: tile.rect.width * camera.scale, height: tile.rect.height * camera.scale)
+                        .clipShape(RoundedRectangle(cornerRadius: selectedKey == tile.id ? 12 : 5))
+                        .overlay(RoundedRectangle(cornerRadius: 5).stroke(.white.opacity(0.12)))
+                        .position(x: tile.rect.midX * camera.scale + camera.x, y: tile.rect.midY * camera.scale + camera.y)
+                        .zIndex(selectedKey == tile.id ? 2 : 0)
+                        .onTapGesture { if selectedKey != tile.id { select(tile) } }
+                    }
                 }
-                .padding(30)
-            case .ready:
-                wall
             }
-            topBar
-            if let toast {
-                Text(toast).font(.footnote).foregroundStyle(.white)
-                    .padding(.horizontal, 14).padding(.vertical, 8)
-                    .background(.black.opacity(0.65), in: Capsule())
-                    .frame(maxHeight: .infinity, alignment: .top).padding(.top, 68)
+            .contentShape(Rectangle()).clipped()
+            .simultaneousGesture(DragGesture(minimumDistance: 7).onChanged { value in
+                if playback != nil, let key = selectedKey, let tile = placements.first(where: { $0.id == key }) {
+                    let rect = CGRect(x: tile.rect.minX * camera.scale + camera.x, y: tile.rect.minY * camera.scale + camera.y, width: tile.rect.width * camera.scale, height: tile.rect.height * camera.scale)
+                    if rect.contains(value.startLocation) { return }
+                }
+                if dragOrigin == nil { dragOrigin = camera }
+                guard let origin = dragOrigin else { return }
+                camera = bounded(WallCamera(x: origin.x + value.translation.width, y: origin.y + value.translation.height, scale: origin.scale))
+            }.onEnded { value in
+                guard let origin = dragOrigin else { return }
+                withAnimation(.easeOut(duration: 0.3)) {
+                    camera = bounded(WallCamera(x: origin.x + value.predictedEndTranslation.width,
+                                                 y: origin.y + value.predictedEndTranslation.height, scale: origin.scale))
+                }
+                dragOrigin = nil
+            })
+            .simultaneousGesture(MagnifyGesture().onChanged { value in
+                if pinchOrigin == nil { pinchOrigin = camera }
+                guard let origin = pinchOrigin else { return }
+                camera = bounded(origin.zoomed(by: value.magnification,
+                    anchor: CGPoint(x: value.startAnchor.x * viewport.width, y: value.startAnchor.y * viewport.height)))
+            }.onEnded { _ in pinchOrigin = nil })
+            .onAppear { viewport = geometry.size; refreshTiles() }
+            .onChange(of: geometry.size) { _, size in viewport = size; refreshTiles() }
+            .onChange(of: camera) { _, _ in refreshTiles() }
+            .overlay(alignment: .top) { topBar }
+            .overlay {
+                if items.isEmpty {
+                    if let error {
+                        VStack(spacing: 12) { Text(error); Button("重试") { Task { await loadMore() } } }.foregroundStyle(.white)
+                    } else if busy { ProgressView().tint(.white) }
+                }
+            }
+            .overlay(alignment: .bottom) {
+                if let toast { Text(toast).font(.footnote).padding(12).foregroundStyle(.white).background(.black.opacity(0.8), in: Capsule()).padding(20) }
             }
         }
-        .statusBarHidden()
-        .onAppear { muted = preferences.wallMuted }
-        .task {
-            muted = preferences.wallMuted
-            await load()
-        }
-        .sheet(item: $detailItem) { item in
+        .background(Color.black.ignoresSafeArea()).statusBarHidden()
+        .task { await loadMore() }
+        .sheet(item: $detail) { item in
             NavigationStack {
                 ItemDetailView(item: item, api: api)
-                    .navigationDestination(for: EntityRoute.self) { route in
-                        EntityDetailView(api: api, kind: route.kind, name: route.name)
-                    }
-                    .navigationDestination(for: PeachItem.self) { next in
-                        ItemDetailView(item: next, api: api)
-                    }
-            }
-                .preferredColorScheme(.dark)
+                    .navigationDestination(for: EntityRoute.self) { EntityDetailView(api: api, kind: $0.kind, name: $0.name) }
+                    .navigationDestination(for: PeachItem.self) { ItemDetailView(item: $0, api: api) }
+            }.preferredColorScheme(.dark)
         }
-        .fullScreenCover(item: $playing) { item in
-            PlayerView(item: item, api: api, startsMuted: muted)
-        }
-        .overlay {
-            if let preview {
-                WallFocusView(api: api, item: preview, muted: muted, onClose: { self.preview = nil },
-                              onPlay: { playing = preview; self.preview = nil },
-                              onLater: { Task { await toggleLater(preview) } },
-                              onMute: {
-                                  preferences.wallMuted.toggle()
-                                  muted = preferences.wallMuted
-                              },
-                              onDetail: { detailItem = preview; self.preview = nil })
-                    .transition(.opacity)
-            }
-        }
-        .onChange(of: preview?.id) { _, value in
-            if value == nil { selected = nil }
-        }
-    }
-
-    private var wall: some View {
-        ScrollView([.horizontal, .vertical]) {
-            LazyVStack(spacing: 6) {
-                ForEach(Array(blocks.enumerated()), id: \.offset) { blockIndex, block in
-                    WallBlockView(
-                        api: api,
-                        items: block,
-                        template: templates[blockIndex % templates.count],
-                        image: preferences.wallImage,
-                        selected: selected,
-                        onSelect: { item in
-                            withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) { selected = item }
-                            preview = item
-                        },
-                        onOpenDetail: { detailItem = $0 },
-                        onToggleLater: { item in await toggleLater(item) },
-                        onPlay: { playing = $0 }
-                    )
-                    .frame(width: 360 * zoom, height: 240 * zoom)
-                }
-            }
-            .padding(.top, 60)
-            .padding(.bottom, 40)
-            .padding(.horizontal, 10)
-        }
-        .scrollIndicators(.hidden)
-        .background(Color.black)
-    }
-
-    private var blocks: [[PeachItem]] {
-        stride(from: 0, to: items.count, by: 12).map {
-            Array(items[$0..<min($0 + 12, items.count)])
-        }
+        .fullScreenCover(item: $fullPlayer, onDismiss: {
+            if let playback, !playback.controller.isPiPActive { Task { await playback.controller.activate() } }
+        }) { session in PlayerView(session: session, preserveOnExit: true) }
+        .onChange(of: detail?.id) { _, id in playback?.controller.setActive(id == nil && scenePhase == .active) }
+        .onChange(of: scenePhase) { _, phase in if fullPlayer == nil { playback?.controller.setActive(phase == .active) } }
+        .onDisappear { if fullPlayer == nil, playback?.controller.isPiPActive != true { playback?.close() } }
     }
 
     private var topBar: some View {
-        VStack {
-            HStack(spacing: 8) {
-                Button { dismiss() } label: {
-                    Image(systemName: "chevron.left").font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.white).frame(width: 38, height: 38)
-                        .background(.black.opacity(0.5), in: Circle())
-                }
-                .accessibilityLabel("退出播放墙")
-                Spacer()
-                Menu {
-                    ForEach(WallImage.allCases) { image in
-                        Button(image.label) { preferences.wallImage = image }
-                    }
-                } label: {
-                    Text(preferences.wallImage.label)
-                        .font(.caption.weight(.medium)).foregroundStyle(.white)
-                        .padding(.horizontal, 12).frame(height: 32)
-                        .background(.black.opacity(0.5), in: Capsule())
-                }
-                Button {
-                    preferences.wallMuted.toggle()
-                    muted = preferences.wallMuted
-                } label: {
-                    Image(systemName: muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                        .font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
-                        .frame(width: 38, height: 38).background(.black.opacity(0.5), in: Circle())
-                }
-                .accessibilityLabel(muted ? "打开播放墙声音" : "静音播放墙")
-                Button { zoom = min(1.6, zoom + 0.2) } label: { zoomButton("plus.magnifyingglass") }
-                Button { zoom = max(0.6, zoom - 0.2) } label: { zoomButton("minus.magnifyingglass") }
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 10)
+        HStack(spacing: 8) {
+            icon("chevron.left", "退出播放墙") { playback?.close(); dismiss() }
             Spacer()
+            Menu {
+                ForEach(WallImage.allCases) { image in Button(image.label) { preferences.wallImage = image } }
+            } label: { Text(preferences.wallImage.label).font(.caption).foregroundStyle(.white).padding(12).background(.black.opacity(0.6), in: Capsule()) }
+            icon(preferences.wallMuted ? "speaker.slash.fill" : "speaker.wave.2.fill", "播放墙声音") {
+                preferences.wallMuted.toggle(); playback?.controller.setMuted(preferences.wallMuted)
+            }
+            icon("plus.magnifyingglass", "放大") { zoom(1.2) }
+            icon("minus.magnifyingglass", "缩小") { zoom(1 / 1.2) }
+        }.padding(.horizontal, 12).padding(.top, 8)
+    }
+    private func icon(_ name: String, _ label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) { Image(systemName: name).font(.system(size: 17)).foregroundStyle(.white).frame(width: 44, height: 44).background(.black.opacity(0.55), in: Circle()) }
+            .buttonStyle(.plain).accessibilityLabel(label)
+    }
+    private func focusActions(_ item: PeachItem) -> some View {
+        VStack {
+            HStack { Spacer(); icon("xmark", "收起") { clearSelection() } }
+            Spacer()
+            HStack {
+                icon("play.fill", "播放") {
+                    let session = PlayerPresentation(api: api, item: item)
+                    session.controller.setMuted(preferences.wallMuted)
+                    playback = session
+                }
+                icon(item.watchLater ? "bookmark.fill" : "bookmark", "稍后看") { Task { await toggleLater(item) } }
+                icon("info.circle", "详情") { detail = item }
+            }
+        }.padding(10).background(LinearGradient(colors: [.clear, .clear, .black.opacity(0.6)], startPoint: .top, endPoint: .bottom))
+    }
+    private func bounded(_ camera: WallCamera) -> WallCamera {
+        WallLayout.bounded(camera, count: items.count, viewport: viewport, finite: finite && selectedKey == nil)
+    }
+    private func zoom(_ factor: CGFloat) { camera = bounded(camera.zoomed(by: factor, anchor: CGPoint(x: viewport.width / 2, y: viewport.height / 2))) }
+    private func select(_ tile: WallPlacement) {
+        playback?.close(); playback = nil
+        if selectedKey == nil { savedCamera = camera }
+        selectedKey = tile.id
+        let parts = tile.id.split(separator: ":").compactMap { Int($0) }
+        let rect = WallLayout.frame(x: parts[0], y: parts[1], slot: parts[2], focused: parts[2])
+        let scale = min(camera.scale, (viewport.width - 24) / rect.width, (viewport.height - 100) / rect.height)
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.86)) {
+            camera = WallCamera(x: viewport.width / 2 - rect.midX * scale,
+                                y: (viewport.height + 50) / 2 - rect.midY * scale, scale: scale)
+            refreshTiles()
         }
     }
-
-    private func zoomButton(_ name: String) -> some View {
-        Image(systemName: name).font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
-            .frame(width: 38, height: 38).background(.black.opacity(0.5), in: Circle())
+    private func clearSelection() {
+        playback?.close(); playback = nil; selectedKey = nil
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.86)) {
+            if let savedCamera { camera = savedCamera }
+            refreshTiles()
+        }
     }
-
-    private func load() async {
-        state = .loading
-        var sample = filter
-        sample.sort = .seed
-        sample.seed = Int.random(in: 1...99990)
+    private func refreshTiles() {
+        let visible = WallLayout.visible(count: items.count, finite: finite, camera: camera, viewport: viewport, focus: selectedKey)
+        placements = finite ? visible : exploration.assign(visible, count: items.count, hasMore: hasMore)
+        if hasMore, !busy, !items.isEmpty,
+           (finite ? (placements.map(\.index).max() ?? 0) >= items.count - 12 : exploration.used.count >= items.count - 12) {
+            Task { await loadMore() }
+        }
+    }
+    private func loadMore() async {
+        guard !busy, hasMore else { return }
+        busy = true; error = nil
+        defer { busy = false }
         do {
-            let page = try await api.items(sample, offset: 0, limit: 60)
-            items = page.items.filter {
-                ($0.medium ?? "video") == "video" && $0.hasCover
-                    && !($0.coverKey.isEmpty && $0.displayNumber.isEmpty)
-                    && $0.location != "online" && ($0.cost ?? "free") != "metered"
-            }
-            if let focused = selected, let fresh = items.first(where: { $0.id == focused.id }) {
-                selected = fresh
-            }
-            guard !items.isEmpty else {
-                state = .failed("当前筛选下没有带封面的可播放作品")
-                return
-            }
-            state = .ready
-        } catch let failure {
-            state = .failed(failure.localizedDescription)
-        }
+            let page = try await api.items(filter, offset: offset, limit: 60)
+            offset += page.items.count
+            hasMore = !page.items.isEmpty && offset < (page.total ?? offset + (page.hasMore == true ? 1 : 0))
+            items.append(contentsOf: page.items.filter { ($0.medium ?? "video") == "video" && $0.hasCover && !($0.coverKey.isEmpty && $0.displayNumber.isEmpty) })
+            refreshTiles()
+            if items.isEmpty && !hasMore { error = "当前筛选下没有带封面的影片" }
+        } catch { self.error = error.localizedDescription; toast = error.localizedDescription }
     }
-
     private func toggleLater(_ item: PeachItem) async {
         do {
-            let on = try await api.toggleWatchLater(id: item.id)
-            if let index = items.firstIndex(where: { $0.id == item.id }) {
-                items[index] = PeachItem(copying: item, watchLater: on)
-            }
-            toast = on ? "已加入稍后看" : "已移出稍后看"
-            try? await Task.sleep(for: .seconds(1.4))
-            toast = nil
-        } catch let failure {
-            toast = failure.localizedDescription
-        }
+            let value = try await api.toggleWatchLater(id: item.id)
+            if let index = items.firstIndex(where: { $0.id == item.id }) { items[index] = PeachItem(copying: item, watchLater: value) }
+            toast = value ? "已加入稍后看" : "已移出稍后看"
+        } catch { toast = error.localizedDescription }
+        try? await Task.sleep(for: .seconds(2)); toast = nil
     }
 }
 
-private struct WallBlockView: View {
+private struct WallArtwork: View {
+    let item: PeachItem
     let api: PeachAPI
-    let items: [PeachItem]
-    let template: [CGRect]
     let image: WallImage
-    let selected: PeachItem?
-    let onSelect: (PeachItem) -> Void
-    let onOpenDetail: (PeachItem) -> Void
-    let onToggleLater: (PeachItem) async -> Void
-    let onPlay: (PeachItem) -> Void
-
-    private let pitch: CGFloat = 28.8
-    private let gap: CGFloat = 2
-
+    let ratio: CGFloat
+    @State private var thumbnail: UIImage?
     var body: some View {
         GeometryReader { proxy in
-            let scale = proxy.size.width / (12 * pitch)
-            ZStack(alignment: .topLeading) {
-                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                    let rect = template[index % template.count]
-                    WallTile(
-                        api: api,
-                        item: item,
-                        image: image,
-                        isSelected: selected?.id == item.id,
-                        onSelect: { onSelect(item) },
-                        onOpenDetail: { onOpenDetail(item) },
-                        onToggleLater: { await onToggleLater(item) },
-                        onPlay: { onPlay(item) }
-                    )
-                    .frame(width: rect.width * pitch * scale - gap,
-                           height: rect.height * pitch * scale - gap)
-                    .offset(x: rect.minX * pitch * scale, y: rect.minY * pitch * scale)
-                    .zIndex(selected?.id == item.id ? 10 : 0)
-                }
-            }
+            ZStack {
+                Color.black
+                if image == .thumbnail, let thumbnail {
+                    Image(uiImage: thumbnail).resizable().scaledToFill()
+                } else if ratio < 1 { CoverPoster(item: item, api: api) }
+                else { RemoteImage(url: api.coverURL(code: item.coverKey.isEmpty ? item.displayNumber : item.coverKey)) }
+            }.frame(width: proxy.size.width, height: proxy.size.height).clipped()
         }
-    }
-}
-
-private struct WallTile: View {
-    let api: PeachAPI
-    let item: PeachItem
-    let image: WallImage
-    let isSelected: Bool
-    let onSelect: () -> Void
-    let onOpenDetail: () -> Void
-    let onToggleLater: () async -> Void
-    let onPlay: () -> Void
-
-    private var source: URL? {
-        image == .cover
-            ? api.coverURL(code: item.coverKey.isEmpty ? item.displayNumber : item.coverKey)
-            : api.thumbURL(id: item.id)
-    }
-
-    var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            RemoteImage(url: source)
-            LinearGradient(colors: [.clear, .black.opacity(0.72)], startPoint: .center, endPoint: .bottom)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(item.displayNumber.isEmpty ? item.title : item.displayNumber)
-                    .font(.system(size: 10, weight: .bold).monospaced())
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                if isSelected {
-                    Text(item.performers.prefix(2).joined(separator: " · "))
-                        .font(.system(size: 8)).foregroundStyle(.white.opacity(0.72)).lineLimit(1)
-                }
-            }
-            .padding(6)
-            if item.progress > 0 {
-                VStack { Spacer(); Rectangle().fill(PeachTheme.coral).frame(height: 2) }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .scaleEffect(x: CGFloat(item.progress), anchor: .leading)
-            }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: isSelected ? 10 : 3, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: isSelected ? 10 : 3, style: .continuous)
-            .stroke(isSelected ? PeachTheme.coral : .white.opacity(0.06), lineWidth: isSelected ? 2 : 1))
-        .onTapGesture { isSelected ? onPlay() : onSelect() }
-        .contextMenu {
-            Button { onPlay() } label: { Label("播放", systemImage: "play.fill") }
-            Button { onOpenDetail() } label: { Label("打开详情", systemImage: "info.circle") }
-            Button { Task { await onToggleLater() } } label: {
-                Label(item.watchLater ? "移出稍后看" : "稍后看", systemImage: item.watchLater ? "bookmark.fill" : "bookmark")
-            }
+        .task(id: "\(item.id):\(image.rawValue)") {
+            guard image == .thumbnail else { return }
+            let sheet = await PeachImageCache.shared.image(for: api.thumbURL(id: item.id))
+            guard !Task.isCancelled else { return }
+            thumbnail = sheet?.cropped(to: TimelineTile.nineGrid(time: 0.5, duration: 1))
         }
     }
 }

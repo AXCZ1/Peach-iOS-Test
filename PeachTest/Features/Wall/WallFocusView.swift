@@ -1,111 +1,40 @@
 import SwiftUI
 
-/// Expanded wall tile. The web wall grows one card to a 6×6 gear and moves the
-/// other eleven around it; on the phone the focused item takes the screen and
-/// the wall remains behind a dimmed backdrop. Controls mirror the web focus
-/// panel: play, watch later, sound, detail and close.
 struct WallFocusView: View {
-    let api: PeachAPI
-    let item: PeachItem
-    let muted: Bool
+    @ObservedObject var session: PlayerPresentation
+    @ObservedObject private var controller: PlaybackController
     let onClose: () -> Void
-    let onPlay: () -> Void
-    let onLater: () -> Void
-    let onMute: () -> Void
-    let onDetail: () -> Void
-
+    let onFullScreen: () -> Void
+    init(session: PlayerPresentation, onClose: @escaping () -> Void, onFullScreen: @escaping () -> Void) {
+        self.session = session; self.controller = session.controller
+        self.onClose = onClose; self.onFullScreen = onFullScreen
+    }
     var body: some View {
         ZStack {
-            Color.black.opacity(0.72).ignoresSafeArea()
-            VStack(spacing: 0) {
+            Color.black
+            if let player = controller.player { VideoSurface(player: player) }
+            MediaGestureOverlay(onTap: { controller.togglePlayback() },
+                onDoubleTap: { _ = controller.doubleTap(at: Double($0)) },
+                onSeekChanged: { _ in }, onSeekEnded: { _ in }, allowsHorizontalSeek: false,
+                onHoldBegan: { controller.beginBoost() }, onHoldEnded: { controller.endBoost() })
+            if controller.phase == .preparing { ProgressView().tint(.white).allowsHitTesting(false) }
+            if case .failed(let message) = controller.phase { Text(message).font(.caption).foregroundStyle(.white).padding() }
+            VStack {
+                HStack { Spacer(); button("xmark", "收起", onClose) }
+                Spacer()
+                if controller.isBoosting { Text("2×").foregroundStyle(.white).allowsHitTesting(false) }
                 HStack {
-                    Button { onClose() } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 38, height: 38)
-                            .background(.white.opacity(0.12), in: Circle())
-                    }
-                    .accessibilityLabel("收起作品")
+                    button(controller.isPlaying ? "pause.fill" : "play.fill", "播放或暂停") { controller.togglePlayback() }
                     Spacer()
-                    if item.watchLater {
-                        Image(systemName: "bookmark.fill")
-                            .font(.system(size: 13))
-                            .foregroundStyle(PeachTheme.coral)
-                    }
+                    button("arrow.up.left.and.arrow.down.right", "打开播放器", onFullScreen)
                 }
-                .padding(.horizontal, 18)
-                .padding(.top, 14)
-
-                Spacer(minLength: 8)
-
-                RemoteImage(url: api.coverURL(code: item.coverKey.isEmpty ? item.displayNumber : item.coverKey))
-                    .aspectRatio(16 / 10, contentMode: .fit)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .padding(.horizontal, 18)
-
-                VStack(alignment: .leading, spacing: 7) {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(item.displayNumber.isEmpty ? item.title : item.displayNumber)
-                            .font(.system(size: 21, weight: .bold).monospaced())
-                            .foregroundStyle(.white)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.7)
-                        Spacer(minLength: 0)
-                        Text(item.durationText)
-                            .font(.caption2.monospacedDigit())
-                            .foregroundStyle(.white.opacity(0.45))
-                    }
-                    Text(item.title)
-                        .font(.footnote)
-                        .foregroundStyle(.white.opacity(0.7))
-                        .lineLimit(2)
-                    Text(item.performers.isEmpty ? (item.studio ?? "未归属") : item.performers.joined(separator: " · "))
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.45))
-                        .lineLimit(1)
-                    if item.progress > 0 {
-                        ProgressView(value: item.progress)
-                            .tint(PeachTheme.coral)
-                    }
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 16)
-
-                Spacer(minLength: 10)
-
-                HStack(spacing: 10) {
-                    Button { onPlay() } label: {
-                        Image(systemName: "play.fill")
-                            .font(.system(size: 20, weight: .bold))
-                            .foregroundStyle(.black)
-                            .frame(width: 58, height: 58)
-                            .background(PeachTheme.coral, in: Circle())
-                    }
-                    .accessibilityLabel("播放")
-                    focusButton(item.watchLater ? "bookmark.fill" : "bookmark", title: item.watchLater ? "移出稍后看" : "稍后看", action: onLater)
-                    focusButton(muted ? "speaker.slash" : "speaker.wave.2", title: muted ? "静音" : "有声", action: onMute)
-                    focusButton("info.circle", title: "详情", action: onDetail)
-                }
-                .padding(.bottom, 26)
-            }
+                PlaybackSeekBar(controller: controller, api: session.api, item: session.item)
+            }.padding(12)
         }
+        .task { session.appear(); await controller.activate() }
     }
-
-    private func focusButton(_ icon: String, title: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(spacing: 4) {
-                Image(systemName: icon)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 48, height: 48)
-                    .background(.white.opacity(0.1), in: Circle())
-                Text(title)
-                    .font(.system(size: 9))
-                    .foregroundStyle(.white.opacity(0.5))
-            }
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(title)
+    private func button(_ icon: String, _ label: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) { Image(systemName: icon).frame(width: 44, height: 44).foregroundStyle(.white).background(.black.opacity(0.55), in: Circle()) }
+            .buttonStyle(.plain).accessibilityLabel(label)
     }
 }

@@ -13,6 +13,8 @@ struct MediaGestureOverlay: UIViewRepresentable {
     var allowsHorizontalSeek = true
     var onSeekBegan: () -> Void = {}
     var onSeekCancelled: () -> Void = {}
+    var onHoldBegan: () -> Void = {}
+    var onHoldEnded: () -> Void = {}
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -54,6 +56,13 @@ final class GestureView: UIView, UIGestureRecognizerDelegate {
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
         pan.maximumNumberOfTouches = 1
         pan.delegate = self
+        let hold = UILongPressGestureRecognizer(target: self, action: #selector(handleHold(_:)))
+        hold.minimumPressDuration = 0.45
+        hold.allowableMovement = 12
+        hold.delegate = self
+        single.require(toFail: hold)
+        double.require(toFail: hold)
+        addGestureRecognizer(hold)
         addGestureRecognizer(pan)
         addGestureRecognizer(single)
         addGestureRecognizer(double)
@@ -67,6 +76,14 @@ final class GestureView: UIView, UIGestureRecognizerDelegate {
         guard coordinator?.parent.allowsHorizontalSeek == true else { return false }
         let velocity = pan.velocity(in: self)
         return abs(velocity.x) > abs(velocity.y) * 1.4
+    }
+
+    @objc private func handleHold(_ recognizer: UILongPressGestureRecognizer) {
+        switch recognizer.state {
+        case .began: coordinator?.parent.onHoldBegan()
+        case .ended, .cancelled, .failed: coordinator?.parent.onHoldEnded()
+        default: break
+        }
     }
 
     @objc private func handleSingle(_ recognizer: UITapGestureRecognizer) {

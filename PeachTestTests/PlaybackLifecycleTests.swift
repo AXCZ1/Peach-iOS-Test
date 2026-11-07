@@ -33,12 +33,12 @@ private final class DelayedPlanProtocol: URLProtocol, @unchecked Sendable {
 
 @MainActor
 final class PlaybackLifecycleTests: XCTestCase {
-    private func controller() throws -> PlaybackController {
+    private func controller(previewOnly: Bool = false) throws -> PlaybackController {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [DelayedPlanProtocol.self]
         let api = PeachAPI(baseURL: URL(string: "http://example.invalid")!, session: URLSession(configuration: configuration))
         let item = try JSONDecoder().decode(PeachItem.self, from: Data("{\"id\":42,\"duration\":120}".utf8))
-        return PlaybackController(api: api, item: item)
+        return PlaybackController(api: api, item: item, previewOnly: previewOnly)
     }
 
     private func waitForRequests(_ count: Int) async throws {
@@ -77,5 +77,38 @@ final class PlaybackLifecycleTests: XCTestCase {
         XCTAssertNil(controller.player)
         XCTAssertFalse(controller.isPlaying)
     }
+    func testBoostReturnsToNormalOnReleaseAndLeavingPage() async throws {
+        let controller = try controller()
+        let request = Task { await controller.activate() }
+        try await waitForRequests(1)
+        DelayedPlanProtocol.pending.finish(); await request.value
+        controller.beginBoost()
+        XCTAssertTrue(controller.isBoosting)
+        XCTAssertEqual(controller.player?.defaultRate, 2)
+        controller.endBoost()
+        XCTAssertFalse(controller.isBoosting)
+        XCTAssertEqual(controller.player?.defaultRate, 1)
+        controller.beginBoost(); controller.setActive(false)
+        XCTAssertFalse(controller.isBoosting)
+        XCTAssertEqual(controller.player?.defaultRate, 1)
+        controller.stop()
+    }
+
+    func testPiPKeepsSessionAliveWhileAppIsInactive() async throws {
+        let controller = try controller()
+        let request = Task { await controller.activate() }
+        try await waitForRequests(1)
+        DelayedPlanProtocol.pending.finish(); await request.value
+        let session = controller.sessionID
+        controller.setPictureInPicture(true)
+        controller.setActive(false)
+        XCTAssertTrue(controller.isPiPActive)
+        XCTAssertEqual(controller.sessionID, session)
+        XCTAssertNotNil(controller.player)
+        controller.setPictureInPicture(false)
+        XCTAssertFalse(controller.isPiPActive)
+        controller.stop()
+    }
+
 }
 #endif

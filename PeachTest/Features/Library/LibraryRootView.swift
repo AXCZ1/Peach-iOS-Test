@@ -28,6 +28,12 @@ struct LibraryRootView: View {
     @State private var showWall = false
     @State private var path = NavigationPath()
     @State private var history: [String] = []
+    @Environment(\.scenePhase) private var scenePhase
+    @ObservedObject private var playbackSessions = PlaybackSessions.shared
+    @State private var previewID: Int?
+    @State private var dwellTask: Task<Void, Never>?
+    @State private var previewBounds: [Int: CGRect] = [:]
+    @State private var previewViewport = CGSize.zero
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -82,6 +88,15 @@ struct LibraryRootView: View {
             }
         }
         .tint(PeachTheme.coral)
+        .onChange(of: path.count) { _, _ in schedulePreview() }
+        .onChange(of: tab) { _, _ in schedulePreview() }
+        .onChange(of: showWall) { _, _ in schedulePreview() }
+        .onChange(of: showImmersive) { _, _ in schedulePreview() }
+        .onChange(of: showFilter) { _, _ in schedulePreview() }
+        .onChange(of: preferences.density) { _, _ in schedulePreview() }
+        .onChange(of: playbackSessions.retained?.id) { _, _ in schedulePreview() }
+        .onChange(of: scenePhase) { _, _ in schedulePreview() }
+        .onDisappear { stopPreview() }
     }
 
     private var header: some View {
@@ -136,7 +151,7 @@ struct LibraryRootView: View {
     }
 
     private var filterBar: some View {
-        VStack(spacing: 7) {
+        HStack(spacing: 6) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(CatalogState.allCases) { state in
@@ -145,18 +160,12 @@ struct LibraryRootView: View {
                         }
                     }
                     if libraries.count > 1 {
-                        Rectangle().fill(PeachTheme.line).frame(width: 1, height: 20)
                         ForEach(libraries) { library in
                             chip(library.name, selected: model.selectedLibraryID == library.id) {
                                 Task { await model.select(libraryID: library.id) }
                             }
                         }
                     }
-                }
-                .padding(.horizontal, 20)
-            }
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
                     activeFilters
                     Menu {
                         ForEach(CatalogSort.allCases) { sort in
@@ -180,23 +189,16 @@ struct LibraryRootView: View {
                         .frame(height: 30)
                         .background(PeachTheme.surface, in: Capsule())
                     }
-                    Button { Task { await model.shuffle() } } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "shuffle")
-                            Text("换一批")
-                        }
-                        .font(.footnote.weight(.medium))
-                        .foregroundStyle(PeachTheme.coral)
-                        .padding(.horizontal, 12)
-                        .frame(height: 30)
-                        .background(PeachTheme.coral.opacity(0.12), in: Capsule())
-                    }
-                    .buttonStyle(.plain)
-                }
-                .padding(.horizontal, 20)
+                }.padding(.leading, 20).padding(.trailing, 4)
             }
-        }
-        .padding(.bottom, 8)
+            Button { stopPreview(); Task { await model.shuffle() } } label: {
+                Label("换一批", systemImage: "shuffle")
+                    .font(.footnote.weight(.medium)).foregroundStyle(PeachTheme.coral)
+                    .padding(.horizontal, 10).frame(height: 36)
+                    .background(PeachTheme.coral.opacity(0.12), in: Capsule())
+            }
+            .buttonStyle(.plain).fixedSize().frame(minHeight: 44).padding(.trailing, 16)
+        }.padding(.bottom, 8)
     }
 
     @ViewBuilder
@@ -277,6 +279,7 @@ struct LibraryRootView: View {
     }
 
     private var content: some View {
+        GeometryReader { viewport in
         ScrollView {
             if model.items.isEmpty {
                 emptyState
@@ -285,7 +288,7 @@ struct LibraryRootView: View {
                 LazyVGrid(columns: columns, spacing: preferences.density == .big ? 22 : 14) {
                     ForEach(model.items) { item in
                         NavigationLink(value: item) {
-                            PeachCard(item: item, api: api, density: preferences.density, portrait: true)
+                            PeachCard(item: item, api: api, density: preferences.density, portrait: true, previewing: previewID == item.id)
                         }
                         .buttonStyle(.plain)
                         .task { await model.loadMoreIfNeeded(current: item) }
@@ -299,7 +302,28 @@ struct LibraryRootView: View {
                 }
             }
         }
-        .refreshable { await model.reload() }
+        .coordinateSpace(name: "libraryViewport")
+        .onPreferenceChange(PreviewBoundsKey.self) { bounds in
+            previewBounds = bounds; previewViewport = viewport.size; schedulePreview()
+        }
+        .refreshable { stopPreview(); await model.reload() }
+        }
+    }
+
+    private func schedulePreview() {
+        stopPreview()
+        guard tab == .library, path.isEmpty, !showFilter, !showWall, !showImmersive,
+              preferences.density == .big, scenePhase == .active, playbackSessions.retained == nil,
+              let id = DwellSelection.candidate(bounds: previewBounds, viewport: CGRect(origin: .zero, size: previewViewport)) else { return }
+        dwellTask = Task {
+            do { try await Task.sleep(for: .seconds(3)) } catch { return }
+            guard !Task.isCancelled else { return }
+            previewID = id
+        }
+    }
+
+    private func stopPreview() {
+        dwellTask?.cancel(); dwellTask = nil; previewID = nil
     }
 
     @ViewBuilder

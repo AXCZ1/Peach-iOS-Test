@@ -145,6 +145,8 @@ struct ItemDetailView: View {
             .disabled(busy)
             .accessibilityIdentifier("detail.climax")
 
+            PreviewFilmstrip(api: api, item: current)
+
             if !current.performers.isEmpty {
                 section("演员") {
                     FlowLayout(spacing: 7) {
