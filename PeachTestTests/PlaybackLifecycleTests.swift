@@ -11,7 +11,7 @@ private final class DelayedPlanProtocol: URLProtocol, @unchecked Sendable {
         var count: Int { lock.lock(); defer { lock.unlock() }; return requests.count }
         func finish() {
             lock.lock(); let ready = requests; requests = []; lock.unlock()
-            for request in ready { request.reply("{\"protocol\":\"range\",\"src\":\"http://example.invalid/test.mp4\"}") }
+            for request in ready { request.reply("{\"id\":42,\"protocol\":\"range\",\"src\":\"http://example.invalid/test.mp4\"}") }
         }
     }
     static let pending = Pending()
@@ -82,15 +82,16 @@ final class PlaybackLifecycleTests: XCTestCase {
         let request = Task { await controller.activate() }
         try await waitForRequests(1)
         DelayedPlanProtocol.pending.finish(); await request.value
+        let player = try XCTUnwrap(controller.player, "Playback plan failed: \(controller.phase)")
         controller.beginBoost()
         XCTAssertTrue(controller.isBoosting)
-        XCTAssertEqual(controller.player?.defaultRate, 2)
+        XCTAssertEqual(player.defaultRate, 2)
         controller.endBoost()
         XCTAssertFalse(controller.isBoosting)
-        XCTAssertEqual(controller.player?.defaultRate, 1)
+        XCTAssertEqual(player.defaultRate, 1)
         controller.beginBoost(); controller.setActive(false)
         XCTAssertFalse(controller.isBoosting)
-        XCTAssertEqual(controller.player?.defaultRate, 1)
+        XCTAssertEqual(player.defaultRate, 1)
         controller.stop()
     }
 
@@ -99,12 +100,13 @@ final class PlaybackLifecycleTests: XCTestCase {
         let request = Task { await controller.activate() }
         try await waitForRequests(1)
         DelayedPlanProtocol.pending.finish(); await request.value
+        let player = try XCTUnwrap(controller.player, "Playback plan failed: \(controller.phase)")
         let session = controller.sessionID
         controller.setPictureInPicture(true)
         controller.setActive(false)
         XCTAssertTrue(controller.isPiPActive)
         XCTAssertEqual(controller.sessionID, session)
-        XCTAssertNotNil(controller.player)
+        XCTAssertTrue(controller.player === player)
         controller.setPictureInPicture(false)
         XCTAssertFalse(controller.isPiPActive)
         controller.stop()
