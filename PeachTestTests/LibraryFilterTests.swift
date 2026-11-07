@@ -28,7 +28,9 @@ final class LibraryFilterTests: XCTestCase {
     func testAddressValidationKeepsOnlyOrigin() throws {
         let url = try PeachAPI.normalizedBaseURL("http://192.168.5.5:8900/")
         XCTAssertEqual(url.absoluteString, "http://192.168.5.5:8900/")
-        XCTAssertThrowsError(try PeachAPI.normalizedBaseURL("192.168.5.5:8900"))
+        XCTAssertEqual(try PeachAPI.normalizedBaseURL("Peach.Example.com:443").absoluteString, "https://peach.example.com/")
+        XCTAssertThrowsError(try PeachAPI.normalizedBaseURL("http://peach.example.com"))
+        XCTAssertThrowsError(try PeachAPI.normalizedBaseURL("http://192.168.5.5.example.com"))
         XCTAssertThrowsError(try PeachAPI.normalizedBaseURL("ftp://192.168.5.5/"))
     }
 

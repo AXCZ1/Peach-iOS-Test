@@ -6,6 +6,11 @@ struct RootView: View {
     var body: some View {
         Group {
             switch session.phase {
+            case .restoring:
+                ZStack {
+                    PeachTheme.background.ignoresSafeArea()
+                    ProgressView("正在恢复登录…").tint(PeachTheme.coral).foregroundStyle(.white)
+                }
             case .signedOut:
                 LoginView()
             case .signedIn:

@@ -128,8 +128,20 @@ struct TimelineMetadata: Decodable, Sendable {
     let source: String?
     let cues: [[Double]]?
     let timestamps: [Double]?
+    let madeAt: Double?
     // A class permits Peach's optional nested fallback without recursive value storage.
     let fallback: TimelineFallback?
+
+    enum CodingKeys: String, CodingKey {
+        case frames, interval, columns, rows, source, cues, timestamps, fallback
+        case madeAt = "made_at"
+    }
+
+    func sampleTime(at index: Int) -> Double {
+        if let timestamps, timestamps.indices.contains(index) { return timestamps[index] }
+        if let cues, cues.indices.contains(index), let start = cues[index].first { return start }
+        return Double(index) * (interval ?? 0)
+    }
 
     func frame(at seconds: Double) -> Int? {
         guard seconds.isFinite, seconds >= 0, let frames, frames > 0 else { return nil }
@@ -150,7 +162,12 @@ struct TimelineMetadata: Decodable, Sendable {
     }
 
     func tile(at seconds: Double) -> TimelineTile? {
-        guard let index = frame(at: seconds), let frames else { return nil }
+        guard let index = frame(at: seconds) else { return nil }
+        return tile(atIndex: index)
+    }
+
+    func tile(atIndex index: Int) -> TimelineTile? {
+        guard let frames, index >= 0, index < frames else { return nil }
         let columns = max(1, self.columns ?? 10), rows = max(1, self.rows ?? 10)
         let perSheet = columns * rows, sheet = index / perSheet, cell = index % perSheet
         let actualRows = (min(perSheet, frames - sheet * perSheet) + columns - 1) / columns

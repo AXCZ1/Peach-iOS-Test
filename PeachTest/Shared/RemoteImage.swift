@@ -16,13 +16,17 @@ final class PeachImageCache {
         if let cached = cache.object(forKey: url as NSURL) { return cached }
         if let task = tasks[url] { return await task.value }
         let task = Task<UIImage?, Never> {
+            let key = MediaCacheKey(url: url)
+            if let data = await MediaDiskCache.shared.read(key, maxAge: 24 * 60 * 60),
+               let image = UIImage(data: data) { return image }
             do {
                 var request = URLRequest(url: url)
                 request.setValue("image/*", forHTTPHeaderField: "Accept")
                 request.timeoutInterval = 30
                 let (data, response) = try await URLSession.shared.data(for: request)
                 guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return nil }
-                guard let image = UIImage(data: data) else { return nil }
+                guard !Task.isCancelled, let image = UIImage(data: data) else { return nil }
+                await MediaDiskCache.shared.store(data, for: key)
                 return image
             } catch {
                 return nil
@@ -30,11 +34,23 @@ final class PeachImageCache {
         }
         tasks[url] = task
         let image = await task.value
+        guard !task.isCancelled else { return nil }
         tasks[url] = nil
         if let image {
             cache.setObject(image, forKey: url as NSURL, cost: Int(image.size.width * image.size.height * 4))
         }
         return image
+    }
+
+    func clear(origin: URL) async throws {
+        cache.removeAllObjects()
+        let active = tasks.filter { PeachAPI.sameOrigin($0.key, origin) }
+        for (url, task) in active {
+            task.cancel()
+            tasks[url] = nil
+        }
+        for task in active.values { _ = await task.value }
+        try await MediaDiskCache.shared.clear(origin: origin)
     }
 }
 

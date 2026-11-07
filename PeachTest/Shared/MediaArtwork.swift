@@ -119,7 +119,7 @@ struct SeekThumbnail: View {
         let candidates = [metadata, metadata?.fallback?.value].compactMap { $0 }
         for candidate in candidates {
             guard let tile = candidate.tile(at: requestedTime) else { continue }
-            let url = api.timelineURL(id: item.id, sheet: tile.sheet, source: tile.source)
+            let url = api.timelineURL(id: item.id, sheet: tile.sheet, source: tile.source, madeAt: candidate.madeAt)
             let sheet = await PeachImageCache.shared.image(for: url)
             guard !Task.isCancelled else { return }
             if let frame = sheet?.cropped(to: tile.region) { image = frame; return }

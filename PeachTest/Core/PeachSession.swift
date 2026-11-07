@@ -2,127 +2,139 @@ import Foundation
 
 @MainActor
 final class PeachSession: ObservableObject {
-    enum Phase: Equatable {
-        case signedOut
-        case signedIn
-    }
+    enum Phase: Equatable { case restoring, signedOut, signedIn }
 
-    @Published private(set) var phase: Phase = .signedOut
+    @Published private(set) var phase: Phase = .restoring
     @Published private(set) var api: PeachAPI?
+    @Published private(set) var passwordSaved = false
+    @Published private(set) var credentialNotice: String?
     @Published var address: String
     @Published var error: String?
 
-    /// One deadline covers address validation, `POST /login` and the
-    /// authenticated library read. Without it a pending local-network prompt
-    /// could leave the login button spinning indefinitely.
-    private let loginDeadline = LoginPolicy.deadline
-
     private let addressKey = "peach.test.address"
-    private var activeAttempt: UUID?
-    private var restoring: Task<Void, Never>?
+    private var working = false
+    private var retryOrigin: URL?
+
+    var canRetryRestore: Bool {
+        retryOrigin != nil && (try? PeachAPI.normalizedBaseURL(address)) == retryOrigin
+    }
 
     init() {
         address = UserDefaults.standard.string(forKey: addressKey) ?? PeachAPI.defaultAddress
     }
 
     func signIn(password: String) async {
-        restoring?.cancel()
-        restoring = nil
+        guard !working, phase == .signedOut else { return }
+        working = true
+        defer { working = false }
         error = nil
-        phase = .signedOut
-        let attempt = UUID()
-        activeAttempt = attempt
-        let loginDeadline = self.loginDeadline
         do {
-            try await withThrowingTaskGroup(of: Void.self) { group in
-                group.addTask {
-                    try await Task.sleep(for: loginDeadline)
-                    throw PeachAPIError(message: "登录超时：25 秒内没有完成登录。请检查本地网络权限与服务地址后重试。")
-                }
-                group.addTask { [address] in
-                    let base = try PeachAPI.normalizedBaseURL(address)
-                    let client = PeachAPI(baseURL: base)
-                    try await client.login(password: password)
-                    let libraries = try await client.libraries()
-                    guard !libraries.isEmpty else {
-                        throw PeachAPIError(message: "Peach 没有返回可浏览的馆藏")
-                    }
-                    await self.finishSignIn(base: base, client: client, attempt: attempt)
-                }
-                try await group.next()
-                group.cancelAll()
+            let base = try PeachAPI.normalizedBaseURL(address)
+            let client = PeachAPI(baseURL: base)
+            try await Self.withDeadline {
+                try await client.login(password: password)
+                try await Self.verify(client)
             }
+            var saved = false
+            do {
+                try SavedPeachPassword.save(password, for: base)
+                saved = true
+                credentialNotice = nil
+            } catch {
+                credentialNotice = "密码未保存：\(error.localizedDescription)"
+            }
+            finish(base: base, saved: saved)
         } catch {
-            // Keep the login form usable after a timeout or network failure.
-            if activeAttempt == attempt {
-                activeAttempt = nil
-                phase = .signedOut
-                self.error = error.localizedDescription
-            }
+            self.error = error.localizedDescription
         }
-    }
-
-    private func finishSignIn(base: URL, client: PeachAPI, attempt: UUID) {
-        guard activeAttempt == attempt else { return }
-        activeAttempt = nil
-        UserDefaults.standard.set(base.absoluteString, forKey: addressKey)
-        address = base.absoluteString
-        api = client
-        phase = .signedIn
-    }
-
-    private func finishRestoreSync(client: PeachAPI) {
-        api = client
-        phase = .signedIn
-    }
-
-    private func failRestoreSync() {
-        phase = .signedOut
     }
 
     func restore() async {
-        guard activeAttempt == nil else { return }
-        guard restoring == nil else { return }
-        let client: PeachAPI
-        do {
-            let base = try PeachAPI.normalizedBaseURL(address)
-            client = PeachAPI(baseURL: base)
-        } catch {
+        guard !working, phase == .restoring else { return }
+        working = true
+        defer { working = false }
+        error = nil
+        retryOrigin = nil
+        guard let base = try? PeachAPI.normalizedBaseURL(address) else { phase = .signedOut; return }
+        let client = PeachAPI(baseURL: base)
+        let password: String?
+        do { password = try SavedPeachPassword.read(for: base) }
+        catch {
+            password = nil
+            credentialNotice = "无法读取保存的密码：\(error.localizedDescription)"
+        }
+        let hasCookie = client.hasSession()
+        guard hasCookie || password != nil else {
+            error = credentialNotice
+            phase = .signedOut
             return
         }
-        guard client.hasSession() else { return }
-        let deadline = loginDeadline
-        let task = Task { @MainActor [weak self] in
-            defer { self?.restoring = nil }
-            do {
-                try await withThrowingTaskGroup(of: Void.self) { group in
-                    group.addTask {
-                        try await Task.sleep(for: deadline)
-                        throw PeachAPIError(message: "恢复登录超时")
-                    }
-                    group.addTask {
-                        _ = try await client.libraries()
-                    }
-                    try await group.next()
-                    group.cancelAll()
+        do {
+            try await Self.withDeadline {
+                if hasCookie {
+                    do { try await Self.verify(client); return }
+                    catch let error as PeachAPIError where error.status == 401 && password != nil { }
                 }
-                guard !Task.isCancelled else { return }
-                guard let self else { return }
-                self.finishRestoreSync(client: client)
-            } catch {
-                self?.failRestoreSync()
+                if let password { try await client.login(password: password) }
+                try await Self.verify(client)
             }
+            finish(base: base, saved: password != nil)
+        } catch {
+            if (error as? PeachAPIError)?.status == 401 {
+                client.clearSession()
+                try? SavedPeachPassword.remove(for: base)
+            } else if password != nil { retryOrigin = base }
+            phase = .signedOut
+            self.error = error.localizedDescription
         }
-        restoring = task
-        await task.value
+    }
+
+    func retryRestore() async {
+        guard canRetryRestore, !working else { return }
+        phase = .restoring
+        await restore()
     }
 
     func signOut() {
-        restoring?.cancel()
-        restoring = nil
-        activeAttempt = nil
-        api?.clearSession()
-        api = nil
+        guard let api else { return }
+        do { try SavedPeachPassword.remove(for: api.baseURL) }
+        catch {
+            credentialNotice = "无法清除保存的密码：\(error.localizedDescription)"
+            return
+        }
+        api.clearSession()
+        self.api = nil
+        passwordSaved = false
+        credentialNotice = nil
+        retryOrigin = nil
         phase = .signedOut
+    }
+
+    private func finish(base: URL, saved: Bool) {
+        UserDefaults.standard.set(base.absoluteString, forKey: addressKey)
+        address = base.absoluteString
+        passwordSaved = saved
+        retryOrigin = nil
+        api = PeachAPI(baseURL: base, savedPassword: { try SavedPeachPassword.read(for: base) })
+        phase = .signedIn
+    }
+
+    private nonisolated static func verify(_ client: PeachAPI) async throws {
+        let libraries = try await client.libraries()
+        guard !libraries.isEmpty else {
+            throw PeachAPIError(message: "Peach 没有返回可浏览的馆藏")
+        }
+    }
+
+    private nonisolated static func withDeadline(_ operation: @escaping @Sendable () async throws -> Void) async throws {
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask {
+                try await Task.sleep(for: LoginPolicy.deadline)
+                throw PeachAPIError(message: "登录超时，请检查网络与服务地址后重试")
+            }
+            group.addTask(operation: operation)
+            defer { group.cancelAll() }
+            try await group.next()
+        }
     }
 }

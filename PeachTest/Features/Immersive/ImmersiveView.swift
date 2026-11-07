@@ -20,6 +20,7 @@ struct ImmersiveView: View {
     @State private var toastID = UUID()
     @State private var detailItem: PeachItem?
     @State private var controlsVisible = true
+    @StateObject private var orientation = PlaybackOrientation()
 
     var body: some View {
         ZStack {
@@ -57,7 +58,8 @@ struct ImmersiveView: View {
         .statusBarHidden()
         .task { await load() }
         .onChange(of: currentID) { _, _ in requestRefill() }
-        .onDisappear { refillTask?.cancel() }
+        .onDisappear { refillTask?.cancel(); orientation.restore() }
+        .environmentObject(orientation)
         .sheet(item: $detailItem) { item in
             NavigationStack {
                 ItemDetailView(item: item, api: api)
@@ -256,8 +258,7 @@ private struct ImmersivePage: View {
     @StateObject private var controller: PlaybackController
     @StateObject private var presentation: PlayerPresentation
     @Environment(\.dismiss) private var dismiss
-    @State private var expanded = false
-    @State private var expandedMode = PlayerDisplayMode.fullscreen
+    @EnvironmentObject private var orientation: PlaybackOrientation
     @State private var detail: PeachItem?
     @State private var busy = false
     @State private var localCount: Int?
@@ -283,13 +284,13 @@ private struct ImmersivePage: View {
         if !names.isEmpty { return names + (current.performers.count > 3 ? " 等 \(current.performers.count) 人" : "") }
         return current.creator ?? current.studio ?? "未归属"
     }
-    private var playbackActive: Bool { isActive && scenePhase == .active && !expanded }
+    private var playbackActive: Bool { isActive && scenePhase == .active }
 
     var body: some View {
         GeometryReader { geometry in
             ZStack {
                 Color.black
-                if controller.player != nil, !expanded {
+                if controller.player != nil {
                     SessionVideoSurface(session: presentation).ignoresSafeArea()
                 } else if !isActive {
                     RemoteImage(url: api.coverURL(code: current.coverKey.isEmpty ? current.displayNumber : current.coverKey))
@@ -358,9 +359,12 @@ private struct ImmersivePage: View {
                         if isActive {
                             HStack(spacing: 12) {
                                 Spacer()
-                                modeButton("rectangle.expand.vertical", "影院模式") { expandedMode = .theater; expanded = true }
                                 modeButton("pip.enter", "小窗") { presentation.startPiP() }
-                                modeButton("arrow.up.left.and.arrow.down.right", "全屏") { expandedMode = .fullscreen; expanded = true }
+                                modeButton(orientation.landscape ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
+                                           orientation.landscape ? "返回竖屏" : "横屏全屏") {
+                                    controller.endBoost()
+                                    orientation.toggle { showGesture("屏幕切换失败：\($0)") }
+                                }
                             }.padding(.horizontal, 16)
                             PlaybackSeekBar(controller: controller, api: api, item: current)
                                 .padding(.horizontal, 20).padding(.bottom, 16)
@@ -376,17 +380,12 @@ private struct ImmersivePage: View {
             controller.onEnded = onEnded
             await controller.activate()
         }
-        .onChange(of: playbackActive) { _, active in if !expanded { controller.setActive(active) } }
+        .onChange(of: playbackActive) { _, active in controller.setActive(active) }
         .onChange(of: controller.isPlaying) { _, playing in
             if playing { controlsVisible = false }
         }
         .onChange(of: item.oCount) { _, count in localCount = count }
-        .onDisappear { if !expanded { presentation.disappear() } }
-        .fullScreenCover(isPresented: $expanded, onDismiss: {
-            if controller.isPiPActive { dismiss(); return }
-            presentation.appear(); presentation.onPiPStarted = { dismiss() }
-            if isActive { Task { await controller.activate() } }
-        }) { PlayerView(session: presentation, preserveOnExit: true, initialMode: expandedMode) }
+        .onDisappear { presentation.disappear() }
         .onChange(of: presentation.message) { _, message in if let message { showGesture(message) } }
         .task(id: item.id) {
             if let fresh = try? await api.item(id: item.id), !Task.isCancelled { detail = fresh }

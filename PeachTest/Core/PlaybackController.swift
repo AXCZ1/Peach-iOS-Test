@@ -32,6 +32,7 @@ final class PlaybackController: ObservableObject {
     private var foregroundActive = false
     private let previewOnly: Bool
     private var previewHop: Task<Void, Never>?
+    private var cachedPreview: CachedPreviewAsset?
 
     let item: PeachItem
     private(set) var sessionID = UUID().uuidString.replacingOccurrences(of: "-", with: "")
@@ -92,17 +93,22 @@ final class PlaybackController: ObservableObject {
         do {
             let plan = try await api.streamPlan(id: item.id, sessionID: requestedSession)
             guard requestedSession == sessionID, !stopped, intent.isActive, !Task.isCancelled else { return }
-            let source: URL
-            if let raw = plan.src, !raw.isEmpty {
-                source = api.mediaURL(raw)
-            } else {
-                source = api.streamURL(id: item.id, sessionID: sessionID)
-            }
+            let source = try api.playbackURL(plan: plan, id: item.id, sessionID: requestedSession)
             formatNote = plan.protocolName == "hls" ? "HLS 自适应分片" : "原始 MP4 流"
             let cookies = HTTPCookieStorage.shared.cookies(for: source) ?? []
-            let asset = AVURLAsset(url: source, options: ["AVURLAssetHTTPCookiesKey": cookies])
+            var asset = AVURLAsset(url: source, options: ["AVURLAssetHTTPCookiesKey": cookies])
+            if previewOnly, plan.protocolName == "range", plan.mimeType == "video/mp4",
+               let cached = try? await PreviewRangeSource.open(origin: api.baseURL, identity: item.mediaCacheIdentity, fetch: { [api] range, version in
+                   try await api.previewBytes(from: source, range: range, validator: version)
+               }) {
+                guard requestedSession == sessionID, !stopped, intent.isActive, !Task.isCancelled else { return }
+                let preview = CachedPreviewAsset(source: cached)
+                cachedPreview = preview
+                asset = preview.asset
+            }
+            guard requestedSession == sessionID, !stopped, intent.isActive, !Task.isCancelled else { return }
             let playerItem = AVPlayerItem(asset: asset)
-            playerItem.preferredForwardBufferDuration = 8
+            playerItem.preferredForwardBufferDuration = previewOnly ? 2 : 8
             let player = AVPlayer(playerItem: playerItem)
             player.automaticallyWaitsToMinimizeStalling = true
             player.allowsExternalPlayback = true
@@ -275,6 +281,7 @@ final class PlaybackController: ObservableObject {
         removeObservers()
         player?.pause()
         player?.replaceCurrentItem(with: nil)
+        cachedPreview?.cancel(); cachedPreview = nil
         api.cancelStream(sessionID: sessionID)
         player = nil
     }
@@ -396,7 +403,7 @@ final class PlaybackController: ObservableObject {
         stallTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(45))
             guard let self, !Task.isCancelled, !self.stopped, self.player === player, self.phase == .preparing else { return }
-            self.phase = .failed("播放源长时间没有响应。请检查手机与 Peach 是否在同一 Wi-Fi，或换一个 MP4 作品验证。")
+            self.phase = .failed("播放源长时间没有响应。请检查网络与 Peach 服务地址。")
         }
     }
 
@@ -445,7 +452,7 @@ final class PlaybackController: ObservableObject {
         if ns.domain == NSURLErrorDomain {
             switch ns.code {
             case NSURLErrorCannotConnectToHost, NSURLErrorNetworkConnectionLost, NSURLErrorNotConnectedToInternet:
-                return "无法连接 Peach。请确认手机在同一 Wi-Fi，且服务地址可访问。"
+                return "无法连接 Peach。请检查网络与服务地址。"
             case NSURLErrorTimedOut:
                 return "连接 Peach 超时。请检查网络后重试。"
             default: break

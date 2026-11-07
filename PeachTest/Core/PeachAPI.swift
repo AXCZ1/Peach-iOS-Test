@@ -5,7 +5,19 @@ import FoundationNetworking
 
 struct PeachAPIError: LocalizedError {
     let message: String
+    let status: Int?
+    init(message: String, status: Int? = nil) { self.message = message; self.status = status }
     var errorDescription: String? { message }
+}
+
+private final class PeachOriginRedirects: NSObject, URLSessionTaskDelegate {
+    let origin: URL
+    init(_ origin: URL) { self.origin = origin }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void) {
+        completionHandler(request.url.map { PeachAPI.sameOrigin($0, origin) } == true ? request : nil)
+    }
 }
 
 /// One client for the running Peach instance. Reads use the authenticated
@@ -17,9 +29,12 @@ final class PeachAPI: @unchecked Sendable {
     nonisolated let baseURL: URL
     private let session: URLSession
     private let decoder = JSONDecoder()
+    private let savedPassword: (@Sendable () throws -> String?)?
+    private let renewal = PeachLoginRenewal()
 
-    init(baseURL: URL, session: URLSession? = nil) {
+    init(baseURL: URL, session: URLSession? = nil, savedPassword: (@Sendable () throws -> String?)? = nil) {
         self.baseURL = baseURL
+        self.savedPassword = savedPassword
         let configuration = URLSessionConfiguration.default
         configuration.httpCookieStorage = .shared
         configuration.httpShouldSetCookies = true
@@ -31,23 +46,40 @@ final class PeachAPI: @unchecked Sendable {
         #if !canImport(FoundationNetworking)
         configuration.waitsForConnectivity = LoginPolicy.waitsForConnectivity
         #endif
-        self.session = session ?? URLSession(configuration: configuration)
+        self.session = session ?? URLSession(configuration: configuration, delegate: PeachOriginRedirects(baseURL), delegateQueue: nil)
     }
 
     nonisolated static func normalizedBaseURL(_ raw: String) throws -> URL {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard var components = URLComponents(string: trimmed),
+        let input = trimmed.contains("://") ? trimmed : "https://" + trimmed
+        guard var components = URLComponents(string: input),
               let scheme = components.scheme?.lowercased(), scheme == "http" || scheme == "https",
               let host = components.host, !host.isEmpty,
               components.user == nil, components.password == nil,
               components.query == nil, components.fragment == nil else {
-            throw PeachAPIError(message: "请输入完整的服务地址，例如 http://192.168.5.5:8900/")
+            throw PeachAPIError(message: "请输入 Peach 域名或服务地址")
         }
+        guard scheme == "https" || LoginPolicy.allowsPlainHTTP(host: host) else {
+            throw PeachAPIError(message: "域名请使用 HTTPS；局域网 IP 仍支持 HTTP")
+        }
+        if let port = components.port, !(1...65_535).contains(port) {
+            throw PeachAPIError(message: "服务端口无效")
+        }
+        components.scheme = scheme
+        components.host = host.lowercased()
+        if components.port == (scheme == "https" ? 443 : 80) { components.port = nil }
         components.path = "/"
         guard let url = components.url else {
             throw PeachAPIError(message: "服务地址无效")
         }
         return url
+    }
+
+    nonisolated static func sameOrigin(_ lhs: URL, _ rhs: URL) -> Bool {
+        let scheme = lhs.scheme?.lowercased()
+        let defaultPort = scheme == "https" ? 443 : 80
+        return scheme == rhs.scheme?.lowercased() && lhs.host?.lowercased() == rhs.host?.lowercased()
+            && (lhs.port ?? defaultPort) == (rhs.port ?? defaultPort) && lhs.user == nil && lhs.password == nil
     }
 
     func url(path: String, query: [URLQueryItem] = []) -> URL {
@@ -76,10 +108,12 @@ final class PeachAPI: @unchecked Sendable {
         return components.url ?? baseURL
     }
 
-    func mediaURL(_ raw: String) -> URL {
-        guard let components = URLComponents(string: raw) else { return resolve(raw) }
-        guard components.scheme != nil, components.host != nil else { return resolve(raw) }
-        return components.url ?? resolve(raw)
+    func playbackURL(plan: StreamPlan, id: Int, sessionID: String) throws -> URL {
+        guard let raw = plan.src, !raw.isEmpty else { return streamURL(id: id, sessionID: sessionID) }
+        guard let url = URL(string: raw, relativeTo: baseURL)?.absoluteURL, Self.sameOrigin(url, baseURL) else {
+            throw PeachAPIError(message: "播放地址与当前 Peach 服务不一致，请检查反代设置")
+        }
+        return url
     }
 
     /// `/cover?code=…` is the official full sleeve. `thumb=2` asks Peach for
@@ -102,12 +136,24 @@ final class PeachAPI: @unchecked Sendable {
     }
 
     func timeline(id: Int) async throws -> TimelineMetadata {
-        try await get("/api/timeline", query: [URLQueryItem(name: "id", value: String(id))])
+        var request = URLRequest(url: url(path: "/api/timeline", query: [URLQueryItem(name: "id", value: String(id))]))
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        let key = MediaCacheKey(url: request.url!)
+        if let data = await MediaDiskCache.shared.read(key, maxAge: 60 * 60),
+           let metadata = try? decoder.decode(TimelineMetadata.self, from: data) { return metadata }
+        let (data, http) = try await authenticatedData(for: request)
+        guard (200..<300).contains(http.statusCode) else { throw Self.error(for: http.statusCode, data: data, decoder: decoder) }
+        let metadata = try decoder.decode(TimelineMetadata.self, from: data)
+        if (metadata.frames ?? 0) > 0 { await MediaDiskCache.shared.store(data, for: key) }
+        return metadata
     }
 
-    func timelineURL(id: Int, sheet: Int, source: String) -> URL {
-        url(path: "/timeline", query: [URLQueryItem(name: "id", value: String(id)),
-            URLQueryItem(name: "s", value: String(sheet)), URLQueryItem(name: "source", value: source)])
+    func timelineURL(id: Int, sheet: Int, source: String, madeAt: Double? = nil) -> URL {
+        var query = [URLQueryItem(name: "id", value: String(id)),
+                     URLQueryItem(name: "s", value: String(sheet)), URLQueryItem(name: "source", value: source)]
+        if let madeAt { query.append(URLQueryItem(name: "v", value: String(madeAt))) }
+        return url(path: "/timeline", query: query)
     }
 
     func posterURL(id: Int) -> URL {
@@ -136,6 +182,7 @@ final class PeachAPI: @unchecked Sendable {
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.cachePolicy = .reloadIgnoringLocalCacheData
         request.httpBody = formEncoded([
             ("token", password),
             ("next", "/"),
@@ -153,7 +200,7 @@ final class PeachAPI: @unchecked Sendable {
         guard (200..<300).contains(http.statusCode) || http.statusCode == 303 else {
             let text = String(data: data, encoding: .utf8) ?? ""
             if text.contains("访问密码不正确") || http.statusCode == 401 {
-                throw PeachAPIError(message: "访问密码不正确")
+                throw PeachAPIError(message: "访问密码不正确", status: 401)
             }
             if http.statusCode == 429 {
                 throw PeachAPIError(message: "尝试次数较多，请一分钟后重试")
@@ -171,7 +218,8 @@ final class PeachAPI: @unchecked Sendable {
     }
 
     func clearSession() {
-        for cookie in HTTPCookieStorage.shared.cookies(for: baseURL) ?? [] {
+        session.invalidateAndCancel()
+        for cookie in HTTPCookieStorage.shared.cookies(for: baseURL) ?? [] where cookie.name == "peach_session" {
             HTTPCookieStorage.shared.deleteCookie(cookie)
         }
     }
@@ -316,6 +364,34 @@ final class PeachAPI: @unchecked Sendable {
         ])
     }
 
+    #if canImport(AVFoundation)
+    func previewBytes(from url: URL, range: ClosedRange<Int64>, validator: String?) async throws -> PreviewRangeReply {
+        var request = URLRequest(url: url)
+        request.setValue("bytes=\(range.lowerBound)-\(range.upperBound)", forHTTPHeaderField: "Range")
+        request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
+        request.setValue(validator, forHTTPHeaderField: "If-Range")
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        let (body, response) = try await session.bytes(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 206,
+              let header = http.value(forHTTPHeaderField: "Content-Range"), let received = HTTPByteRange(header),
+              received.bounds.lowerBound == range.lowerBound,
+              received.bounds.upperBound == min(range.upperBound, received.length - 1) else {
+            body.task.cancel()
+            throw PeachAPIError(message: "服务未返回可缓存的视频分段")
+        }
+        let count = Int(received.bounds.upperBound - received.bounds.lowerBound + 1)
+        var data = Data(capacity: count)
+        for try await byte in body {
+            data.append(byte)
+            if data.count == count { break }
+        }
+        guard data.count == count else { throw PeachAPIError(message: "视频分段传输不完整") }
+        let etag = http.value(forHTTPHeaderField: "ETag")
+        let version = etag?.hasPrefix("W/") == false ? etag : http.value(forHTTPHeaderField: "Last-Modified")
+        return PreviewRangeReply(range: received, validator: version, data: data)
+    }
+    #endif
+
     /// Mirrors the web client's first-play counter. The server only increments
     /// `play_count`; the caller records progress separately through `activity`.
     func markPlayed(id: Int) async throws {
@@ -392,10 +468,7 @@ final class PeachAPI: @unchecked Sendable {
         var request = URLRequest(url: url(path: path, query: query))
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.cachePolicy = .reloadIgnoringLocalCacheData
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw PeachAPIError(message: "Peach 返回了无效响应")
-        }
+        let (data, http) = try await authenticatedData(for: request)
         guard (200..<300).contains(http.statusCode) else {
             throw Self.error(for: http.statusCode, data: data, decoder: decoder)
         }
@@ -409,10 +482,7 @@ final class PeachAPI: @unchecked Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue(baseURL.absoluteString, forHTTPHeaderField: "Origin")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw PeachAPIError(message: "Peach 返回了无效响应")
-        }
+        let (data, http) = try await authenticatedData(for: request)
         guard (200..<300).contains(http.statusCode) else {
             throw Self.error(for: http.statusCode, data: data, decoder: decoder)
         }
@@ -420,9 +490,29 @@ final class PeachAPI: @unchecked Sendable {
     }
 
     private static func error(for status: Int, data: Data, decoder: JSONDecoder) -> PeachAPIError {
-        if status == 401 { return PeachAPIError(message: "登录已过期，请重新登录") }
+        if status == 401 { return PeachAPIError(message: "登录已过期，请重新登录", status: 401) }
         let payload = try? decoder.decode(PeachErrorResponse.self, from: data)
-        return PeachAPIError(message: payload?.error ?? "请求失败（\(status)）")
+        return PeachAPIError(message: payload?.error ?? "请求失败（\(status)）", status: status)
+    }
+
+    private func authenticatedData(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        let version = await renewal.generation
+        let result = try await response(for: request)
+        guard result.1.statusCode == 401, let savedPassword else { return result }
+        try await renewal.recover(since: version) {
+            guard let password = try savedPassword() else {
+                throw PeachAPIError(message: "登录已过期，请重新登录", status: 401)
+            }
+            try await self.login(password: password)
+        }
+        try Task.checkCancellation()
+        return try await response(for: request)
+    }
+
+    private func response(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw PeachAPIError(message: "Peach 返回了无效响应") }
+        return (data, http)
     }
 
     private func formEncoded(_ fields: [(String, String)]) -> Data {
@@ -438,7 +528,7 @@ final class PeachAPI: @unchecked Sendable {
     private static func loginNetworkMessage(_ error: URLError) -> String {
         switch error.code {
         case .notConnectedToInternet, .cannotConnectToHost, .networkConnectionLost:
-            return "无法连接 Peach。请确认手机与 Peach 在同一 Wi-Fi；如果刚才弹出了“本地网络”权限，请允许后重试。"
+            return "无法连接 Peach。请检查网络与服务地址；局域网连接还需允许本地网络权限。"
         case .timedOut:
             return "登录超时：没有收到 Peach 的响应。请检查服务地址与本地网络权限后重试。"
         case .cannotFindHost, .dnsLookupFailed:

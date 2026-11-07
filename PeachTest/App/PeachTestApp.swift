@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct PeachTestApp: App {
+    @UIApplicationDelegateAdaptor(PeachAppDelegate.self) private var delegate
     @StateObject private var session = PeachSession()
     @StateObject private var preferences = Preferences()
     @StateObject private var playback = PlaybackSessions.shared

@@ -1,3 +1,4 @@
+import AVFoundation
 import SwiftUI
 import UIKit
 
@@ -39,8 +40,8 @@ struct TimelineFrameView: View {
             else { ProgressView().tint(.white) }
         }
         .task(id: "\(item.id):\(index)") {
-            guard let tile = metadata.tile(at: Double(index) * (metadata.interval ?? 0) + 0.001) else { failed = true; return }
-            let sheet = await PeachImageCache.shared.image(for: api.timelineURL(id: item.id, sheet: tile.sheet, source: tile.source))
+            guard let tile = metadata.tile(atIndex: index) else { failed = true; return }
+            let sheet = await PeachImageCache.shared.image(for: api.timelineURL(id: item.id, sheet: tile.sheet, source: tile.source, madeAt: metadata.madeAt))
             guard !Task.isCancelled else { return }
             image = sheet?.cropped(to: tile.region); failed = image == nil
         }
@@ -57,7 +58,13 @@ struct PreviewFilmstrip: View {
     @State private var reload = 0
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("预览图").font(.subheadline.weight(.semibold)).foregroundStyle(.white.opacity(0.7))
+            HStack {
+                Text("预览图").font(.subheadline.weight(.semibold)).foregroundStyle(.white.opacity(0.7))
+                Spacer()
+                if (metadata?.frames ?? 0) > 0 {
+                    Text("点开看原画").font(.caption).foregroundStyle(.secondary)
+                }
+            }
             if let metadata, let count = metadata.frames, count > 0 {
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(spacing: 8) {
@@ -66,7 +73,7 @@ struct PreviewFilmstrip: View {
                                 VStack(spacing: 5) {
                                     TimelineFrameView(api: api, item: item, metadata: metadata, index: index)
                                         .frame(width: 144, height: 81).clipShape(RoundedRectangle(cornerRadius: 8))
-                                    Text(MediaClock.text(timestamp(index, metadata)))
+                                    Text(MediaClock.text(metadata.sampleTime(at: index)))
                                         .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
                                 }
                             }.buttonStyle(.plain)
@@ -91,8 +98,12 @@ struct PreviewFilmstrip: View {
                     TabView(selection: $selected) {
                         ForEach(0..<min(30, metadata.frames ?? 0), id: \.self) { index in
                             VStack {
-                                TimelineFrameView(api: api, item: item, metadata: metadata, index: index)
-                                Text("\(index + 1) / \(min(30, metadata.frames ?? 0)) · \(MediaClock.text(timestamp(index, metadata)))")
+                                if selected == index {
+                                    OriginalPreviewImage(api: api, item: item, seconds: metadata.sampleTime(at: index))
+                                } else {
+                                    TimelineFrameView(api: api, item: item, metadata: metadata, index: index)
+                                }
+                                Text("\(index + 1) / \(min(30, metadata.frames ?? 0)) · \(MediaClock.text(metadata.sampleTime(at: index)))")
                                     .font(.caption.monospacedDigit()).foregroundStyle(.white)
                             }.padding(.vertical, 60).tag(index)
                         }
@@ -103,8 +114,100 @@ struct PreviewFilmstrip: View {
             }
         }
     }
-    private func timestamp(_ index: Int, _ metadata: TimelineMetadata) -> Double {
-        if let values = metadata.timestamps, values.indices.contains(index) { return values[index] }
-        return Double(index) * (metadata.interval ?? 0)
+}
+
+private struct OriginalPreviewImage: View {
+    let api: PeachAPI
+    let item: PeachItem
+    let seconds: Double
+    @State private var image: UIImage?
+    @State private var error: String?
+    @State private var retry = 0
+
+    var body: some View {
+        VStack(spacing: 8) {
+            ZStack {
+                Color.black
+                if let image { ZoomableFrame(image: image) }
+                else if let error {
+                    VStack(spacing: 12) {
+                        Text(error).font(.footnote).multilineTextAlignment(.center)
+                        Button("重试") { retry += 1 }.tint(PeachTheme.coral)
+                    }.padding(28).foregroundStyle(.white)
+                } else { ProgressView("正在读取原画…").tint(.white).foregroundStyle(.white) }
+            }
+            if let frame = image?.cgImage {
+                Text("\(frame.width) × \(frame.height)").font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+            }
+        }
+        .task(id: retry) {
+            error = nil
+            do {
+                let key = MediaCacheKey(url: api.baseURL, kind: .originalFrame, resource: "\(item.mediaCacheIdentity):\(seconds)")
+                if let data = await MediaDiskCache.shared.read(key), let cached = UIImage(data: data) {
+                    image = cached
+                    return
+                }
+                let session = UUID().uuidString
+                defer { api.cancelStream(sessionID: session) }
+                let plan = try await api.streamPlan(id: item.id, sessionID: session)
+                let url = try api.playbackURL(plan: plan, id: item.id, sessionID: session)
+                let cookies = HTTPCookieStorage.shared.cookies(for: url) ?? []
+                let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPCookiesKey": cookies])
+                let frame = try await OriginalVideoFrame.capture(asset: asset, seconds: seconds, hls: plan.protocolName == "hls")
+                try Task.checkCancellation()
+                image = UIImage(cgImage: frame)
+                let data = try await Task.detached(priority: .utility) { try OriginalVideoFrame.png(frame) }.value
+                if !Task.isCancelled { await MediaDiskCache.shared.store(data, for: key) }
+            } catch {
+                if !Task.isCancelled, image == nil { self.error = "原画读取失败：\(error.localizedDescription)" }
+            }
+        }
+    }
+}
+
+private struct ZoomableFrame: UIViewRepresentable {
+    let image: UIImage
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeUIView(context: Context) -> UIScrollView {
+        let scroll = FrameScrollView()
+        scroll.delegate = context.coordinator
+        scroll.maximumZoomScale = 4
+        scroll.showsHorizontalScrollIndicator = false
+        scroll.showsVerticalScrollIndicator = false
+        let view = context.coordinator.imageView
+        view.contentMode = .scaleAspectFit
+        view.translatesAutoresizingMaskIntoConstraints = false
+        scroll.addSubview(view)
+        NSLayoutConstraint.activate([
+            view.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor),
+            view.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor),
+            view.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor),
+            view.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor),
+            view.heightAnchor.constraint(equalTo: scroll.frameLayoutGuide.heightAnchor)
+        ])
+        return scroll
+    }
+
+    func updateUIView(_ view: UIScrollView, context: Context) {
+        if context.coordinator.imageView.image !== image {
+            view.setZoomScale(1, animated: false)
+            context.coordinator.imageView.image = image
+        }
+    }
+
+    final class Coordinator: NSObject, UIScrollViewDelegate {
+        let imageView = UIImageView()
+        func viewForZooming(in scrollView: UIScrollView) -> UIView? { imageView }
+    }
+
+    private final class FrameScrollView: UIScrollView {
+        override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            if gestureRecognizer === panGestureRecognizer, zoomScale <= minimumZoomScale { return false }
+            return super.gestureRecognizerShouldBegin(gestureRecognizer)
+        }
     }
 }

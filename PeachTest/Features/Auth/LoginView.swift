@@ -18,12 +18,12 @@ struct LoginView: View {
                     Text("Peach")
                         .font(.system(size: 42, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
-                    Text("馆藏测试版")
+                    Text("我的馆藏")
                         .font(.title3.weight(.medium))
                         .foregroundStyle(.white.opacity(0.55))
                         .padding(.top, 2)
 
-                    Text("使用同一 Wi-Fi 连接你的 Peach 媒体库。")
+                    Text("输入 Peach 的 HTTPS 域名或局域网地址。")
                         .font(.subheadline)
                         .foregroundStyle(.white.opacity(0.55))
                         .padding(.top, 18)
@@ -33,7 +33,7 @@ struct LoginView: View {
                     HStack(spacing: 10) {
                         Image(systemName: "network")
                             .foregroundStyle(.white.opacity(0.45))
-                        TextField("http://192.168.5.5:8900/", text: $session.address)
+                        TextField("peach.example.com", text: $session.address)
                             .keyboardType(.URL)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
@@ -89,7 +89,13 @@ struct LoginView: View {
                     .padding(.top, 28)
                     .accessibilityIdentifier("login.submit")
 
-                    Text("密码仅用于本次登录，并保存在系统 Cookie 存储中；不会写入构建产物。")
+                    if session.canRetryRestore {
+                        Button("重试自动登录") { Task { await session.retryRestore() } }
+                            .font(.subheadline).tint(PeachTheme.coral).padding(.top, 16)
+                            .disabled(working)
+                    }
+
+                    Text("登录成功后，密码存到此设备的钥匙串，用于自动恢复登录。退出登录会清除密码。")
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.35))
                         .lineSpacing(3)

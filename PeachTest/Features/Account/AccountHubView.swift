@@ -4,6 +4,8 @@ struct AccountHubView: View {
     let api: PeachAPI
     @ObservedObject var session: PeachSession
     let libraryCount: Int
+    @State private var clearingCache = false
+    @State private var cacheNotice: String?
 
     var body: some View {
         List {
@@ -27,6 +29,13 @@ struct AccountHubView: View {
                 LabeledContent("服务", value: session.address)
                 LabeledContent("馆藏", value: "\(libraryCount) 个")
                 LabeledContent("Peach", value: "0.52.0")
+                LabeledContent("登录密码", value: session.passwordSaved ? "已保存在此设备" : "下次输入后保存")
+                if let notice = session.credentialNotice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
+            }
+            Section("本机缓存") {
+                Button("清除封面、预览图和视频片段缓存") { Task { await clearCache() } }
+                    .disabled(clearingCache)
+                if let cacheNotice { Text(cacheNotice).font(.footnote).foregroundStyle(.secondary) }
             }
             Section {
                 Button("退出登录", role: .destructive) { session.signOut() }
@@ -40,6 +49,15 @@ struct AccountHubView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(PeachTheme.background, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
+    }
+
+    private func clearCache() async {
+        clearingCache = true
+        defer { clearingCache = false }
+        do {
+            try await PeachImageCache.shared.clear(origin: api.baseURL)
+            cacheNotice = "已清除"
+        } catch { cacheNotice = "清除失败：\(error.localizedDescription)" }
     }
 }
 

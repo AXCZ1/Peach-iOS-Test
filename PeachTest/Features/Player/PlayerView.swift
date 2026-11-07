@@ -1,18 +1,14 @@
 import AVKit
 import SwiftUI
 
-enum PlayerDisplayMode { case standard, theater, fullscreen }
-
 struct PlayerView: View {
     let item: PeachItem
     let api: PeachAPI
-    var startsMuted = false
-    var preserveOnExit = false
+    let preserveOnExit: Bool
     @Environment(\.dismiss) private var dismiss
     @StateObject private var session: PlayerPresentation
     @StateObject private var model: PlaybackController
-    @State private var displayMode: PlayerDisplayMode = .standard
-    @State private var previousMode: PlayerDisplayMode = .standard
+    @StateObject private var orientation = PlaybackOrientation()
     @State private var toast: String?
     @State private var undoAction: SingleUseAction?
     @State private var toastID = UUID()
@@ -22,29 +18,22 @@ struct PlayerView: View {
     @State private var feedbackID = UUID()
     @State private var controlsVisible = true
 
-    init(item: PeachItem, api: PeachAPI, startsMuted: Bool = false) {
-        let session = PlayerPresentation(api: api, item: item)
-        session.controller.setMuted(startsMuted)
-        self.init(session: session, startsMuted: startsMuted)
+    init(item: PeachItem, api: PeachAPI) {
+        self.init(session: PlayerPresentation(api: api, item: item))
     }
 
-    init(session: PlayerPresentation, startsMuted: Bool = false, preserveOnExit: Bool = false, initialMode: PlayerDisplayMode = .standard) {
-        _displayMode = State(initialValue: initialMode)
+    init(session: PlayerPresentation, preserveOnExit: Bool = false) {
         self.preserveOnExit = preserveOnExit
-        self.item = session.item; self.api = session.api; self.startsMuted = startsMuted
+        self.item = session.item; self.api = session.api
         _session = StateObject(wrappedValue: session)
         _model = StateObject(wrappedValue: session.controller)
     }
 
     var body: some View {
-        GeometryReader { geometry in
-        ScrollView {
-        VStack(spacing: 0) {
         ZStack {
             Color.black.ignoresSafeArea()
             if model.player != nil {
-                SessionVideoSurface(session: session)
-                    .ignoresSafeArea(edges: displayMode == .fullscreen ? .all : [])
+                SessionVideoSurface(session: session).ignoresSafeArea()
                 MediaGestureOverlay(
                     onTap: { withAnimation(.easeInOut(duration: 0.18)) { controlsVisible.toggle() } },
                     onDoubleTap: { fraction in showGesture(model.doubleTap(at: Double(fraction))) },
@@ -82,23 +71,10 @@ struct PlayerView: View {
                     .transition(.opacity)
             }
         }
-        .frame(height: displayMode == .fullscreen ? geometry.size.height :
-            displayMode == .theater ? max(220, geometry.size.height - 44) : max(220, geometry.size.width * 9 / 16))
-        if displayMode != .fullscreen {
-            VStack(alignment: .leading, spacing: 18) {
-                Text(item.title).font(.headline).foregroundStyle(.white)
-                Text(item.performers.joined(separator: " · ")).font(.subheadline).foregroundStyle(.secondary)
-                if displayMode == .standard { PreviewFilmstrip(api: api, item: item) }
-            }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
-        }
-        }
-        }.scrollDisabled(displayMode == .fullscreen).background(Color.black)
         .overlay(alignment: .bottom) {
             if let toast { ToastBar(message: toast, undo: undoAction).padding(20) }
         }
-        }
-        .ignoresSafeArea(edges: displayMode == .fullscreen ? .all : [])
-        .statusBarHidden(displayMode == .fullscreen)
+        .statusBarHidden()
         .persistentSystemOverlays(.hidden)
         .task(id: scenePhase) {
             guard scenePhase == .active else { return }
@@ -109,7 +85,10 @@ struct PlayerView: View {
             session.onPiPStarted = { dismiss() }
         }
         .onChange(of: scenePhase) { _, phase in model.setActive(phase == .active) }
-        .onDisappear { session.disappear(keepPlayback: preserveOnExit) }
+        .onDisappear {
+            orientation.restore()
+            session.disappear(keepPlayback: preserveOnExit)
+        }
         .onChange(of: session.message) { _, message in if let message { showToast(message) } }
         .onChange(of: model.isPlaying) { _, playing in
             guard playing else { return }
@@ -185,18 +164,14 @@ struct PlayerView: View {
                 PlaybackSeekBar(controller: model, api: api, item: item)
                 HStack(spacing: 14) {
                     Spacer()
-                    playerIcon(displayMode == .theater ? "rectangle.compress.vertical" : "rectangle.expand.vertical", label: "影院模式") {
-                        model.endBoost()
-                        displayMode = displayMode == .theater ? .standard : .theater
-                    }
                     playerIcon("heart", label: "记一次高潮") { Task { await recordClimax() } }
                         .disabled(feedbackBusy)
                     playerIcon("pip.enter", label: "小窗播放") { session.startPiP() }
                         .opacity(session.pipPossible ? 1 : 0.45)
-                    playerIcon(displayMode == .fullscreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right", label: "全屏") {
+                    playerIcon(orientation.landscape ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
+                               label: orientation.landscape ? "返回竖屏" : "横屏全屏") {
                         model.endBoost()
-                        if displayMode == .fullscreen { displayMode = previousMode }
-                        else { previousMode = displayMode; displayMode = .fullscreen }
+                        orientation.toggle { showToast("屏幕切换失败：\($0)") }
                     }
                 }.frame(height: 44)
             }.padding(.horizontal, 20).padding(.bottom, 8)
