@@ -1,3 +1,18 @@
+# Peach iOS Test — 构建 18 验收
+
+安装包：[Peach-iOS-Test-unsigned.18.ipa](C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.18.ipa)，1,552,120 字节，无签名 iPhone ARM64，iOS 17.0+。SHA256 `0f88a4be9ada0b5da11053f7efc974a1fbc12e04fff2185445fd1c0d69bbcf2b`。源码 `a50d94e310f07a7ff1fb902343aac4c6cad418e1`；Codemagic `6aef0d4804bc42b5d4ae7294`，日志和校验在 `artifacts/codemagic-18/`。保留构建 13 回退。
+
+普通全屏、沉浸和播放墙内嵌优先通过 Peach 自带的限时链接按 Range 读取 MP4/M4V/MOV 原文件。系统无可解码的视频轨、报告格式错误或旧后端缺少该接口时，使用既有兼容流。墙内切全屏继续使用同一会话；布局、手势、大图停留预览、NAS iOS、软路由和源文件不变。
+
+- `PeachAPI.swift`：使用现有登录获取原文件播放地址，只接受当前服务对应作品的地址。
+- `PlaybackController.swift`、`PlayerPresentation.swift`、`ImmersiveView.swift`：选择直放或兼容流，兼容切换保留进度、暂停和播放计数；普通和墙内共用展示会话。
+- 生产只读验证：IPZZ-991 与 MIDA-574 的文件头、中部和末尾均返回 `206`，字节与源文件一致。证据 `artifacts/original-playback-range-20261107.json`。
+- Mac Debug/Release 各 46 通过、3 跳过；H.264 原文件起播、跳转、原尺寸帧解码，缺视频轨、解码报错回退、保留暂停位置和拒绝跨域地址均通过。HEVC `hev1` 原视频轨通过 HTTP 读取；云端 Mac 将它报告为不可解码，iPhone 实际画面和速度仍待验收。Release 编译与两端 IPA 校验通过，未启动模拟器。
+
+真机先播放 IPZZ-991 和 MIDA-574，分别确认出画面、声音和跳到未播过位置的速度。单击显示控制栏，看普通播放器标题下方是否为「原文件直放」；出现「HLS 自适应分片」说明使用了兼容流。再从播放墙内播放同一部，切全屏并返回，确认进度和声音连续；顺手验收沉浸、MKV、双击和小窗。
+
+---
+
 # Peach iOS Test — 构建 13 验收
 
 安装包：[Peach-iOS-Test-unsigned.13.ipa](C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.13.ipa)，1,537,197 字节，无签名 iPhone ARM64，iOS 17.0+。SHA256 `0ce060f8713ba2b4b8e59ebc3ce200825859625a1ca44496a91f7d86d8822efb`。源码 `e0fa70f10dafd085af952ddd6035f9e99009a93a`；Codemagic `6aeeebcf630282fcf14921fb`；日志及本机校验在 `artifacts/codemagic-13/`。构建 12 保留回退。

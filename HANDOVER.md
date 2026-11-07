@@ -1,5 +1,14 @@
 # 当前继续点（2026-11-07）
 
+独立 App **构建 18** 已打包校验并放入 Downloads。普通全屏、沉浸及播放墙内嵌使用原文件优先，AVPlayer 检查视频轨能否解码，必要时回退 Peach 既有兼容流。墙内切全屏沿用会话；未改服务端、域名、媒体、大图预览或 NAS iOS。
+
+- IPA：C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.18.ipa；1,552,120 字节；SHA256 `0f88a4be9ada0b5da11053f7efc974a1fbc12e04fff2185445fd1c0d69bbcf2b`。
+- 源码 `a50d94e310f07a7ff1fb902343aac4c6cad418e1`；Codemagic `6aef0d4804bc42b5d4ae7294`。Debug/Release 各 46 通过、3 跳过，iPhone Release 编译与 IPA 校验通过。
+- IPZZ-991 和 MIDA-574 的实际原文件 Range 读取一致；云端 Mac 验证 H.264 起播、拖动、原帧和兼容回退，报告 HEVC `hev1` 视频轨不可解码。真机按 ACCEPTANCE.md 首节验证 IPZZ-991 首帧、跳转和播放墙；只有手机显示「原文件直放」且出画面才能确认这部片绕开软路由转码。
+- 回退保留构建 13；源码回退点 `8421ac8`，备份 `backups/original-playback-20261107-190910/source.bundle`。NAS 82 的 SHA256 已核对不变。
+
+## 构建 13 历史
+
 独立 App **构建 13** 已打包和校验，等待 iPhone 验收。仅改 App 的四项反馈：详情预览宽高各翻倍、秒开已有图并提前取原画；大图预览首帧与缓冲；横屏进度区；馆藏导航上方黑边。播放墙内嵌、NAS iOS、域名、后端和媒体未改。
 
 - IPA：C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.13.ipa；1,537,197 字节；SHA256 `0ce060f8713ba2b4b8e59ebc3ce200825859625a1ca44496a91f7d86d8822efb`。

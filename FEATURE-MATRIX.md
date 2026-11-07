@@ -22,7 +22,7 @@
 | 详情「不合口味／看过了」 | 同值再点取消，不同值互斥 | POST /api/feedback | 详情动作行 | 已实现·待真机 |
 | 播放记忆 | 本地记播放秒数，重开续播；播完清零；服务端 leave_ratio 兜底 | 本地 UserDefaults + GET /api/item.leave_ratio | 播放器与沉浸页 | 已实现·待真机 |
 | 观看统计 | 首次起播 play_count += 1；每 10 秒、暂停、拖动、结束上报真实观看秒数、位置、seek 次数 | POST /api/play、POST /api/activity | PlaybackController；只在有效活动会话首次 .playing 计数 | 已实现·待真机；非活动页面与延迟计划回归见测试 |
-| 播放源 | 服务端给 HLS 就播 HLS，否则 Range MP4；每格独立流会话，关闭时取消 | GET /api/stream-plan、POST /api/stream-cancel | PlaybackController | 已实现·待真机（MP4/MKV） |
+| 播放源 | 普通、沉浸、播放墙优先按 Range 读 MP4/M4V/MOV 原文件，由 AVPlayer 解码。格式无法解码或旧服务缺少原文件接口时用原有播放计划；MKV 仍按原计划播放。 | POST /api/external-playback、GET /external-stream/{id}；兼容 GET /api/stream-plan、POST /api/stream-cancel | PlaybackController | 已实现·待真机（含 HEVC MP4） |
 | 顶栏「播放墙」 | 二维封面墙，封面/缩略图切换；点开一张放大，墙后留暗场；可播放、稍后看、看详情、缩放；进入时有声（与网页一致） | GET /api/items、GET /cover、GET /thumb、POST /api/watch-later | 馆藏右上角播放墙；VideoWallView | 原版几何、无限探索、二维相机及聚焦重排已实现·待真机 |
 | 顶栏「密度：大图 / 密集」 | 网页 localStorage.density 在 336px 与 168px 间切换，只影响目录网格，重开保留 | 本地存储 | 馆藏右上角密度按钮；Preferences.density | 已实现·待真机；大图为 3:4 正封卡，复用 poster_box 和演员资料；小图保持原布局 |
 | 图片页大图/小图 | 网页照片页用 photoSize，与视频网格密度分开保存 | 本地存储 | 本实例未做照片墙 | 待实现：后续阶段 |
