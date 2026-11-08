@@ -93,7 +93,8 @@ actor OfflinePreviewStore {
         try data.write(to: dir.appendingPathComponent("index.json"), options: .atomic)
         // New-version files have their own directory so a replaced video never reads its old frames.
         for old in try FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.isDirectoryKey])
-            where old != files && (try? old.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
+            where old.lastPathComponent != files.lastPathComponent &&
+                  (try? old.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
             try FileManager.default.removeItem(at: old)
         }
     }
