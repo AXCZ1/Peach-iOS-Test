@@ -1,3 +1,24 @@
+# 构建 29：整库原图缓存与播放控制
+
+独立安装包：[Peach-iOS-Test-unsigned.29.ipa](C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.29.ipa)，21,016,427 字节。SHA256 `39e49f86d4e39b7b2397564f9cf82ca29765419df3e5d654dfa4c9ca2890d62a`。无签名 iPhone ARM64、iOS 17.0+，Bundle ID `com.axcz1.peachios.test`。默认命名位置已有不同文件，未覆盖。源码 `9f1c3f2eeedb5b59e9734e5f959e48e1e75e0cb6`；Codemagic `6af0cbeaa1b4111a0a6c3413`，日志和本地校验见 `artifacts/codemagic-29/`。
+
+| 改动 | 文件 |
+| --- | --- |
+| 手动整库缓存，续做、跳过和孤儿清理；详情优先使用同一份原图 | OfflinePreviews.swift、MediaDiskCache.swift、OfflinePreviewScan.swift、AccountHubView.swift、PeachTestApp.swift、PreviewFilmstrip.swift |
+| 普通播放器与随机连播的进度预览复用原图 | MediaArtwork.swift、PlayerView.swift、ImmersiveView.swift |
+| 相册与普通竖屏播放下滑返回，随机连播分页与横屏定位 | PreviewFilmstrip.swift、MediaGestureOverlay.swift、PlayerView.swift、ImmersiveView.swift、PlaybackOrientation.swift |
+| 馆藏排序和方向记忆，取消不保存 | LibraryModel.swift、FilterSheet.swift |
+| 原生计数写入和撤销，按时间打点 | PeachAPI.swift、PlaybackController.swift、ClimaxMarks.swift、MediaArtwork.swift、PlayerView.swift、ImmersiveView.swift |
+
+验证：Mac Debug/Release 各 55 通过、4 跳过，iPhone ARM64 Release 编译成功。PC 独立校验了 Mach-O、IPA 结构、Bundle ID 和 SHA256。WSL 的 42 项测试通过，含 OfflinePreviewTests.swift 的采样、分页、孤儿清理、续做和版本失效，以及 LivePeachTests.swift 使用真实隔离 Peach 的反代测试：带不匹配 Origin 的请求返回 403，匿名原生请求返回 401，已认证原生请求记录和撤销均返回 200，本机时间点同步新增和移除，隔离计数恢复原值。针对 Mac 的目录比较修正后，WSL 重跑三项缓存测试通过。GitHub Actions 仍禁用。
+
+真机待验收：
+
+1. 在「我的 → 本机缓存」打开扫描；试中途取消或切到后台再回前台。完成后打开 MP4、MKV 详情，确认图已在本机，点开放大同一帧，未放大时可下滑返回、放大后下滑能移动图。
+2. 重扫确认已完成作品跳过，新增作品补缓存；普通播放器拖动进度确认使用缓存原图，未缓存只显示时间。
+3. 选择非默认排序和方向，重开 App、清除筛选确认保留；打开随机连播翻页，确认停住后不露出下一页；按全屏来回切换时作品、进度和声音不变。
+4. 普通播放器和随机连播播放到明显时间点后记录一次，点小点跳回该时间，重开仍在；撤销移除对应小点。复核普通竖屏下滑关闭及既有横拖、双击、倍速、播放墙内嵌手势。未安装到 iPhone、未使用模拟器；SONE-081 正式播放黑屏不在这轮修复范围。
+
 # Peach iOS Test — 构建 27 验收
 
 安装包：[Peach-iOS-Test-unsigned.27.ipa](C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.27.ipa)，20,917,350 字节，无签名 iPhone ARM64，iOS 17.0+。SHA256 `8f93c70a5b84d87e599b0a0c92ac98f229a2315c5e5a335fb62fbe54e00d3407`。源码 `9f81cd04eaa3207cccbc1e2c6700f186c5321878`；Codemagic `6aefe2910e0f7ecdb5f76a2b`。本机校验和云端日志见 `artifacts/codemagic-27/`。

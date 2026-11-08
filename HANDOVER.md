@@ -1,6 +1,13 @@
-# 当前继续点（2026-11-08）
+# 当前继续点（2026-11-09）
 
-独立 App **构建 27** 已校验并放入 Downloads，待 iPhone 复测 SONE-081。VLC 起播已收到数据但未输出首帧时，使用同一原文件在手机上以软件解码重试一次。其余播放和预览仍用原文件。
+独立 App **构建 29** 已编译、校验并放入 Downloads：`C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.29.ipa`。整库原图缓存、排序记忆、下滑返回、随机连播横屏和高潮点待 iPhone 验收。详见 ACCEPTANCE.md 首节。
+
+- 源码 `9f1c3f2eeedb5b59e9734e5f959e48e1e75e0cb6`，Codemagic `6af0cbeaa1b4111a0a6c3413`。构建 27 保留回退，改动前备份为 `backups/preview-player-20261109-030505/source.zip`（`0c972b1`）。
+- 构建 27 在真机仍有 SONE-081 黑屏，构建 29 未调整该解码路径。未修改服务端、媒体或 NAS iOS。
+
+## 构建 27 历史
+
+独立 App **构建 27** 已校验并放入 Downloads；iPhone 复测 SONE-081 仍黑屏。VLC 起播已收到数据但未输出首帧时，使用同一原文件在手机上以软件解码重试一次。其余播放和预览仍用原文件。
 
 - IPA：C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.27.ipa；源码 `9f81cd04eaa3207cccbc1e2c6700f186c5321878`，Codemagic `6aefe2910e0f7ecdb5f76a2b`。只读排查、回归和真机步骤见 ACCEPTANCE.md 首节。
 - 保留构建 26 IPA 回退。
