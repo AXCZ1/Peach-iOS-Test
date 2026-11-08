@@ -38,7 +38,7 @@ final class PlaybackLifecycleTests: XCTestCase {
         configuration.protocolClasses = [DelayedTicketProtocol.self]
         let api = PeachAPI(baseURL: URL(string: "http://example.invalid")!, session: URLSession(configuration: configuration))
         let item = try JSONDecoder().decode(PeachItem.self, from: Data("{\"id\":42,\"duration\":120}".utf8))
-        return PlaybackController(api: api, item: item, makeLocalPlayer: { _ in
+        return PlaybackController(api: api, item: item, makeLocalPlayer: { _, _ in
             XCTFail("An inactive page installed a decoder")
             return nil
         })

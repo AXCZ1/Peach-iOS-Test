@@ -65,7 +65,7 @@ final class OriginalPlaybackTests: XCTestCase {
         defer { fixture.stop() }
         let local = RecordingLocalPlayer()
         var openedURLs: [URL] = []
-        let controller = try fixture.controller(id: 42002, makeLocalPlayer: { url in
+        let controller = try fixture.controller(id: 42002, makeLocalPlayer: { url, _ in
             openedURLs.append(url)
             return local
         })
@@ -121,7 +121,7 @@ final class OriginalPlaybackTests: XCTestCase {
         defer { fixture.stop() }
         let local = RecordingLocalPlayer()
         var source: URL?
-        let controller = try fixture.controller(id: 42006, makeLocalPlayer: { source = $0; return local })
+        let controller = try fixture.controller(id: 42006, makeLocalPlayer: { url, _ in source = url; return local })
         defer { controller.stop(); PlayerMemory.shared.clear(42006) }
         await controller.activate()
         XCTAssertEqual(source?.path, "/external-stream/42006")
@@ -159,7 +159,7 @@ final class OriginalPlaybackTests: XCTestCase {
         defer { fixture.stop() }
         let local = RecordingLocalPlayer()
         var source: URL?
-        let controller = try fixture.controller(name: "fixture.mkv", makeLocalPlayer: { source = $0; return local })
+        let controller = try fixture.controller(name: "fixture.mkv", makeLocalPlayer: { url, _ in source = url; return local })
         defer { controller.stop() }
         await controller.activate()
         XCTAssertEqual(source?.path, "/external-stream/42001")
@@ -168,13 +168,60 @@ final class OriginalPlaybackTests: XCTestCase {
         XCTAssertEqual(counts["tickets"], 1)
         XCTAssertNil(counts["original_ranges"])
         XCTAssertNil(counts["plans"])
+        local.onEvent?(.failed("原文件不可达"))
+        XCTAssertEqual(controller.phase, .failed("原文件不可达"))
+        XCTAssertNil(controller.localPlayer)
+    }
+
+    func testMissingFirstFrameRetriesSameOriginalOnceWithoutRecordingAPlay() async throws {
+        let fixture = try OriginalPlaybackFixture()
+        defer { fixture.stop() }
+        let automatic = RecordingLocalPlayer()
+        let software = RecordingLocalPlayer()
+        var sources: [URL] = []
+        var decoders: [LocalOriginalDecoder] = []
+        let controller = try fixture.controller(id: 42007, name: "fixture.mkv", makeLocalPlayer: { url, decoder in
+            sources.append(url)
+            decoders.append(decoder)
+            return decoder == .automatic ? automatic : software
+        })
+        defer { controller.stop(); PlayerMemory.shared.clear(42007) }
+        PlayerMemory.shared.save(7, for: 42007)
+        await controller.activate()
+        let session = controller.sessionID
+        XCTAssertTrue(automatic.playing)
+        XCTAssertEqual(automatic.seekTarget, 7)
+
+        automatic.onEvent?(.failed("没有首帧", canRetryInSoftware: true))
+        XCTAssertTrue(automatic.stopped)
+        XCTAssertTrue(controller.localPlayer === software)
+        XCTAssertEqual(decoders, [.automatic, .software])
+        XCTAssertEqual(sources.count, 2)
+        XCTAssertEqual(sources.first, sources.last)
+        XCTAssertEqual(sources.first?.path, "/external-stream/42007")
+        XCTAssertEqual(controller.sessionID, session)
+        XCTAssertEqual(controller.phase, .preparing)
+        XCTAssertEqual(software.seekTarget, 7)
+        XCTAssertTrue(software.playing)
+        XCTAssertTrue(software.muted)
+
+        software.onEvent?(.failed("软件解码也没有首帧", canRetryInSoftware: true))
+        XCTAssertEqual(controller.phase, .failed("软件解码也没有首帧"))
+        XCTAssertNil(controller.localPlayer)
+        XCTAssertTrue(software.stopped)
+        XCTAssertEqual(sources.count, 2)
+        let counts = try await fixture.counts()
+        XCTAssertEqual(counts["tickets"], 1)
+        XCTAssertNil(counts["plans"])
+        XCTAssertNil(counts["play_marks"])
+        XCTAssertNil(counts["activities"])
     }
 
     func testLocalPictureInPictureKeepsTheOriginalSessionAndCompletesItsSeek() async throws {
         let fixture = try OriginalPlaybackFixture()
         defer { fixture.stop() }
         let local = RecordingLocalPlayer()
-        let controller = try fixture.controller(id: 42006, name: "fixture.mkv", makeLocalPlayer: { _ in local })
+        let controller = try fixture.controller(id: 42006, name: "fixture.mkv", makeLocalPlayer: { _, _ in local })
         defer { controller.stop(); PlayerMemory.shared.clear(42006) }
         await controller.activate()
         local.showFrame(at: 2)
@@ -231,8 +278,8 @@ final class OriginalPlaybackTests: XCTestCase {
         defer { fixture.stop() }
         let local = RecordingLocalPlayer()
         var url: URL?
-        let controller = try fixture.controller(name: "fixture.mkv", previewOnly: true, makeLocalPlayer: {
-            url = $0
+        let controller = try fixture.controller(name: "fixture.mkv", previewOnly: true, makeLocalPlayer: { source, _ in
+            url = source
             return local
         })
         defer { controller.stop() }
@@ -312,7 +359,7 @@ struct OriginalPlaybackFixture {
 
     @MainActor
     func controller(id: Int = 42001, name: String = "fixture.mp4", previewOnly: Bool = false,
-                    makeLocalPlayer: (@MainActor (URL) -> (any LocalOriginalPlayer)?)? = nil) throws -> PlaybackController {
+                    makeLocalPlayer: (@MainActor (URL, LocalOriginalDecoder) -> (any LocalOriginalPlayer)?)? = nil) throws -> PlaybackController {
         PlayerMemory.shared.clear(id)
         let item = try JSONDecoder().decode(PeachItem.self, from: Data("{\"id\":\(id),\"name\":\"\(name)\",\"duration\":24}".utf8))
         let controller = PlaybackController(api: PeachAPI(baseURL: baseURL), item: item, previewOnly: previewOnly,

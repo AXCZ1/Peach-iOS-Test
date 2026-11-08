@@ -33,7 +33,7 @@ final class PlaybackController: ObservableObject {
     var hasVideoSurface: Bool { player != nil || localPlayer != nil }
     private var foregroundActive = false
     private let previewOnly: Bool
-    private let makeLocalPlayer: @MainActor (URL) -> (any LocalOriginalPlayer)?
+    private let makeLocalPlayer: @MainActor (URL, LocalOriginalDecoder) -> (any LocalOriginalPlayer)?
     private var avOriginalURL: URL?
     private var didDisplayAVFrame = false
     private var firstFrameTask: Task<Void, Never>?
@@ -66,16 +66,16 @@ final class PlaybackController: ObservableObject {
     private var didEnd = false
 
     init(api: PeachAPI, item: PeachItem, previewOnly: Bool = false,
-         makeLocalPlayer: (@MainActor (URL) -> (any LocalOriginalPlayer)?)? = nil) {
+         makeLocalPlayer: (@MainActor (URL, LocalOriginalDecoder) -> (any LocalOriginalPlayer)?)? = nil) {
         self.previewOnly = previewOnly
         self.api = api
         self.item = item
         self.makeLocalPlayer = makeLocalPlayer ?? Self.defaultLocalPlayer
     }
 
-    private static func defaultLocalPlayer(_ url: URL) -> (any LocalOriginalPlayer)? {
+    private static func defaultLocalPlayer(_ url: URL, _ decoder: LocalOriginalDecoder) -> (any LocalOriginalPlayer)? {
         #if os(iOS) && !SWIFT_PACKAGE
-        VLCOriginalPlayer(url: url)
+        VLCOriginalPlayer(url: url, decoder: decoder)
         #else
         nil
         #endif
@@ -172,16 +172,16 @@ final class PlaybackController: ObservableObject {
         startTicker()
     }
 
-    private func installLocalPlayer(for source: URL) {
-        guard let backend = makeLocalPlayer(source) else {
+    private func installLocalPlayer(for source: URL, decoder: LocalOriginalDecoder = .automatic) {
+        guard let backend = makeLocalPlayer(source, decoder) else {
             phase = .failed("此设备没有可解码这个原文件的播放器。")
             return
         }
         duration = item.duration ?? duration
-        formatNote = "原文件直放 · VLC"
+        formatNote = decoder == .software ? "原文件直放 · VLC 软件解码" : "原文件直放 · VLC"
         backend.onEvent = { [weak self, weak backend] event in
             guard let self, let backend, self.localPlayer === backend, !self.stopped else { return }
-            self.handleLocalEvent(event)
+            self.handleLocalEvent(event, source: source, decoder: decoder)
         }
         localPlayer = backend
         backend.setMuted(isMuted)
@@ -450,7 +450,7 @@ final class PlaybackController: ObservableObject {
         return player?.currentTime().seconds
     }
 
-    private func handleLocalEvent(_ event: LocalPlaybackEvent) {
+    private func handleLocalEvent(_ event: LocalPlaybackEvent, source: URL, decoder: LocalOriginalDecoder) {
         switch event {
         case let .sample(position, length, playing, hasFrame):
             if let position, !isScrubbing { currentTime = position }
@@ -460,7 +460,7 @@ final class PlaybackController: ObservableObject {
             updatePlaying(playing)
         case .ended:
             if intent.isActive { finishPlayback() }
-        case let .failed(message):
+        case let .failed(message, canRetryInSoftware):
             stopPreviewHops()
             flushActivity(force: true)
             localPlayer?.onEvent = nil
@@ -469,7 +469,13 @@ final class PlaybackController: ObservableObject {
             ticker?.cancel()
             ticker = nil
             isPlaying = false
-            phase = .failed(message)
+            if canRetryInSoftware, decoder == .automatic, !previewOnly, intent.mayPlay {
+                pendingResume = currentTime
+                phase = .preparing
+                installLocalPlayer(for: source, decoder: .software)
+            } else {
+                phase = .failed(message)
+            }
         }
     }
 

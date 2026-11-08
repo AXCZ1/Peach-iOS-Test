@@ -1,10 +1,14 @@
 #if canImport(AVFoundation)
 import Foundation
 
+enum LocalOriginalDecoder: Equatable {
+    case automatic, software
+}
+
 enum LocalPlaybackEvent {
     case sample(position: Double?, duration: Double, playing: Bool, hasFrame: Bool)
     case ended
-    case failed(String)
+    case failed(String, canRetryInSoftware: Bool = false)
 }
 
 @MainActor

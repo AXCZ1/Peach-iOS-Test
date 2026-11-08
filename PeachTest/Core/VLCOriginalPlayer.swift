@@ -32,14 +32,16 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
         VLCLibrary.shared().loggers = [logSink]
     }()
 
-    init(url: URL) {
+    init(url: URL, decoder: LocalOriginalDecoder) {
         _ = Self.installLogSink
         view.backgroundColor = .black
         view.clipsToBounds = true
         view.isUserInteractionEnabled = false
         let player = VLCMediaPlayer()
         player.drawable = view
-        player.media = VLCMedia(url: url)
+        let media = VLCMedia(url: url)
+        if decoder == .software { media?.addOption(":no-hw-dec") }
+        player.media = media
         self.player = player
     }
 
@@ -134,8 +136,11 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
     private func poll() {
         guard let player else { return }
         let state = player.state
+        let statistics = !hasFrame && state != .stopped ? player.media?.statistics : nil
+        let displayedFrame = (statistics?.displayedPictures ?? 0) > 0
+        let canRetryInSoftware = !displayedFrame && (statistics?.demuxReadBytes ?? 0) > 0
         if state == .error {
-            fail("iPhone 无法打开原文件。请检查 Peach 连接和文件格式。")
+            fail("iPhone 无法打开原文件。请检查 Peach 连接和文件格式。", canRetryInSoftware: canRetryInSoftware)
             return
         }
         let milliseconds = player.time.intValue
@@ -143,12 +148,12 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
             position = Double(milliseconds) / 1_000
         }
         let total = duration(of: player)
-        if !hasFrame, state != .stopped, (player.media?.statistics.displayedPictures ?? 0) > 0 {
+        if displayedFrame {
             hasFrame = true
             firstFrameDeadline = nil
         }
         if let deadline = firstFrameDeadline, ContinuousClock.now >= deadline {
-            fail("原文件没有输出画面。")
+            fail("原文件没有输出画面。", canRetryInSoftware: canRetryInSoftware)
             return
         }
         // VLC 4 reports .stopped at EOF. It also starts in .stopped before opening.
@@ -205,9 +210,9 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
         return Double(length) / 1_000
     }
 
-    private func fail(_ message: String) {
+    private func fail(_ message: String, canRetryInSoftware: Bool) {
         stop()
-        onEvent?(.failed(message))
+        onEvent?(.failed(message, canRetryInSoftware: canRetryInSoftware))
     }
 }
 
