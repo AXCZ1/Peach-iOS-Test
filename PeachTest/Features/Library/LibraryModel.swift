@@ -17,9 +17,23 @@ final class LibraryModel: ObservableObject {
     @Published var filter = LibraryFilter()
     @Published var selectedLibraryID: String = ""
 
+    private let defaults: UserDefaults
+    private static let sortKey = "peach.library.sort"
+    private static let ascendingKey = "peach.library.ascending"
     private var api: PeachAPI?
     private var generation = 0
     private let pageSize = 60
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        let sort = CatalogSort(rawValue: defaults.string(forKey: Self.sortKey) ?? "") ?? .seed
+        filter = LibraryFilter(sort: sort, ascending: sort.supportsDirection && defaults.bool(forKey: Self.ascendingKey))
+    }
+
+    private func saveOrder() {
+        defaults.set(filter.sort.rawValue, forKey: Self.sortKey)
+        defaults.set(filter.sort.supportsDirection && filter.ascending, forKey: Self.ascendingKey)
+    }
 
     func attach(_ api: PeachAPI) {
         self.api = api
@@ -75,8 +89,7 @@ final class LibraryModel: ObservableObject {
     }
 
     func clearFilter() async {
-        let library = selectedLibraryID
-        filter = LibraryFilter(libraryID: library)
+        filter = LibraryFilter(libraryID: selectedLibraryID, sort: filter.sort, ascending: filter.ascending, seed: filter.seed)
         await reload()
     }
 
@@ -93,12 +106,20 @@ final class LibraryModel: ObservableObject {
             filter.ascending = false
         }
         if sort == .seed { filter.seed = Int.random(in: 1...99990) }
+        saveOrder()
         await reload()
     }
 
     func shuffle() async {
         filter.sort = .seed
         filter.seed = Int.random(in: 1...99990)
+        saveOrder()
+        await reload()
+    }
+
+    func applySheet(_ updated: LibraryFilter) async {
+        filter = updated
+        saveOrder()
         await reload()
     }
 

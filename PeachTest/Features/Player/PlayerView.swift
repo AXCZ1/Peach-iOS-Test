@@ -19,6 +19,8 @@ struct PlayerView: View {
     @State private var feedbackID = UUID()
     @State private var controlsVisible = true
     @State private var screenScrubOrigin: Double?
+    @State private var dismissOffset: CGFloat = 0
+    @State private var marks: [ClimaxMark] = []
 
     init(item: PeachItem, api: PeachAPI) {
         self.init(session: PlayerPresentation(api: api, item: item))
@@ -35,7 +37,7 @@ struct PlayerView: View {
         ZStack {
             Color.black.ignoresSafeArea()
             if model.hasVideoSurface {
-                SessionVideoSurface(session: session).ignoresSafeArea()
+                SessionVideoSurface(session: session).ignoresSafeArea().offset(y: dismissOffset)
                 screenGestures.ignoresSafeArea()
             }
 
@@ -72,11 +74,12 @@ struct PlayerView: View {
             await model.activate()
         }
         .onAppear {
+            marks = ClimaxMarks.local.list(origin: api.baseURL, item: item)
             session.appear()
             session.onPiPStarted = { dismiss() }
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase != .active { screenScrubOrigin = nil }
+            if phase != .active { screenScrubOrigin = nil; dismissOffset = 0 }
             model.setActive(phase == .active)
         }
         .onDisappear {
@@ -118,7 +121,13 @@ struct PlayerView: View {
                     screenScrubOrigin = nil
                     model.cancelScrubbing()
                 },
-                onHoldBegan: { model.beginBoost() }, onHoldEnded: { model.endBoost() }
+                onHoldBegan: { model.beginBoost() }, onHoldEnded: { model.endBoost() },
+                allowsDownwardDismiss: !preserveOnExit && !orientation.landscape && verticalSizeClass != .compact,
+                onDismissChanged: { dismissOffset = $0 },
+                onDismissEnded: { close in
+                    if close { closePlayer() }
+                    else { withAnimation(.snappy) { dismissOffset = 0 } }
+                }
             )
             .accessibilityElement()
             .accessibilityLabel("视频画面")
@@ -160,7 +169,7 @@ struct PlayerView: View {
     private var chrome: some View {
         VStack {
             HStack {
-                Button { if !preserveOnExit { session.close() }; dismiss() } label: {
+                Button(action: closePlayer) {
                     Image(systemName: "chevron.down")
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(.white)
@@ -195,12 +204,14 @@ struct PlayerView: View {
             Group {
                 if verticalSizeClass == .compact, !preserveOnExit {
                     HStack(spacing: 8) {
-                        PlaybackSeekBar(controller: model, api: api, item: item, inlineTimes: true)
+                        PlaybackSeekBar(controller: model, api: api, item: item, inlineTimes: true,
+                                        usesOfflineOriginals: true, marks: marks)
                         HStack(spacing: 6) { playbackActions }
                     }.padding(.bottom, 2)
                 } else {
                     VStack(spacing: 0) {
-                        PlaybackSeekBar(controller: model, api: api, item: item)
+                        PlaybackSeekBar(controller: model, api: api, item: item,
+                                        usesOfflineOriginals: !preserveOnExit, marks: preserveOnExit ? [] : marks)
                         HStack(spacing: 14) {
                             Spacer()
                             playbackActions
@@ -211,10 +222,19 @@ struct PlayerView: View {
             .padding(.horizontal, 20)
             .background(LinearGradient(colors: [.clear, .black.opacity(0.8)], startPoint: .top, endPoint: .bottom))
         }
+        .offset(y: dismissOffset)
+    }
+
+    private func closePlayer() {
+        if !preserveOnExit { session.close() }
+        dismiss()
     }
 
     @ViewBuilder private var playbackActions: some View {
-        playerIcon("heart", label: "记一次高潮") { Task { await recordClimax() } }
+        playerIcon("heart", label: "记一次高潮") {
+            let position = model.climaxPosition
+            Task { await recordClimax(at: position) }
+        }
             .disabled(feedbackBusy)
         playerIcon("pip.enter", label: "小窗播放") { session.startPiP() }
             .opacity(session.canStartPiP ? 1 : 0.45)
@@ -230,16 +250,18 @@ struct PlayerView: View {
             .buttonStyle(.plain).accessibilityLabel(label)
     }
 
-    private func recordClimax() async {
+    private func recordClimax(at position: Double?) async {
         guard !feedbackBusy else { return }
         feedbackBusy = true
         defer { feedbackBusy = false }
         do {
-            let result = try await api.feedback(id: item.id, kind: "o")
-            showToast("已记录 · \(result.oCount ?? 0)", undo: {
+            let (count, mark) = try await ClimaxMarks.local.record(api: api, item: item, at: position)
+            marks = ClimaxMarks.local.list(origin: api.baseURL, item: item)
+            showToast("已记录 · \(count)", undo: {
                 Task {
                     do {
-                        _ = try await api.feedback(id: item.id, kind: "o-undo")
+                        _ = try await ClimaxMarks.local.undo(api: api, item: item, mark: mark)
+                        marks = ClimaxMarks.local.list(origin: api.baseURL, item: item)
                         showToast("已撤销本次记录")
                     } catch { showToast("撤销失败：\(error.localizedDescription)") }
                 }

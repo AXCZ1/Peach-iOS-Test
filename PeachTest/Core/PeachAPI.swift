@@ -395,7 +395,8 @@ final class PeachAPI: @unchecked Sendable {
     func feedback(id: Int, kind: String, value: Int? = nil) async throws -> PeachFeedbackResponse {
         var body: [String: Any] = ["id": id, "kind": kind]
         if let value { body["value"] = value }
-        return try await post("/api/feedback", body: body)
+        // Peach accepts authenticated native writes without a browser Origin.
+        return try await post("/api/feedback", body: body, includeOrigin: kind != "o" && kind != "o-undo")
     }
 
     @discardableResult

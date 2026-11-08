@@ -90,18 +90,20 @@ struct PreviewFilmstrip: View {
     let item: PeachItem
     let playbackPresented: Bool
     @Environment(\.scenePhase) private var scenePhase
-    @State private var metadata: TimelineMetadata?
+    @State private var times: [Double] = []
     @State private var error: String?
     @State private var selected = 0
     @State private var expanded = false
+    @State private var zoomedIndices: Set<Int> = []
+    @GestureState private var galleryOffset: CGFloat = 0
     @State private var reload = 0
     @State private var frameRetry = 0
     @State private var visibleIndices: Set<Int> = []
     @State private var frames: [MediaCacheKey: FrameState] = [:]
 
     private var stripRequests: [FrameRequest] {
-        guard scenePhase == .active, !playbackPresented, !expanded, let metadata else { return [] }
-        let count = min(30, metadata.frames ?? 0)
+        guard scenePhase == .active, !playbackPresented, !expanded else { return [] }
+        let count = times.count
         guard count > 0 else { return [] }
         let visible = visibleIndices.filter { $0 < count }.sorted()
         let indices: [Int]
@@ -111,7 +113,7 @@ struct PreviewFilmstrip: View {
             // Keep the same first batch when the user scrolls down to the strip.
             indices = Array(0..<min(4, count))
         }
-        return indices.map { request(at: metadata.sampleTime(at: $0)) }
+        return indices.map { request(at: times[$0]) }
     }
 
     var body: some View {
@@ -120,15 +122,15 @@ struct PreviewFilmstrip: View {
             HStack {
                 Text("预览图").font(.subheadline.weight(.semibold)).foregroundStyle(.white.opacity(0.7))
                 Spacer()
-                if (metadata?.frames ?? 0) > 0 {
+                if !times.isEmpty {
                     Text("原图").font(.caption).foregroundStyle(.secondary)
                 }
             }
-            if let metadata, let count = metadata.frames, count > 0 {
+            if !times.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(spacing: 8) {
-                        ForEach(0..<min(30, count), id: \.self) { index in
-                            stripFrame(request(at: metadata.sampleTime(at: index)), index: index)
+                        ForEach(times.indices, id: \.self) { index in
+                            stripFrame(request(at: times[index]), index: index)
                         }
                     }
                 }
@@ -140,15 +142,25 @@ struct PreviewFilmstrip: View {
         .task(id: LoadID(frames: requests, retry: frameRetry)) {
             await loadOriginals(requests)
         }
-        .task(id: "\(item.id):\(reload)") {
+        .task(id: "\(item.mediaCacheIdentity):\(reload)") {
             error = nil
             do {
-                metadata = try await api.timeline(id: item.id)
-                if (metadata?.frames ?? 0) == 0 { error = "预览图尚未生成" }
-            } catch { self.error = "预览图读取失败" }
+                let samples: [Double]
+                if let cached = await OfflinePreviewStore.shared.index(origin: api.baseURL, item: item) {
+                    samples = cached.times
+                } else {
+                    let metadata = try await api.timeline(id: item.id)
+                    samples = PreviewSamplePlan.times(metadata, duration: item.duration)
+                }
+                guard !Task.isCancelled else { return }
+                times = samples
+                if times.isEmpty { error = "预览图尚未生成" }
+            } catch {
+                if !Task.isCancelled { self.error = "预览图读取失败" }
+            }
         }
-        .fullScreenCover(isPresented: $expanded) {
-            if let metadata { gallery(metadata) }
+        .fullScreenCover(isPresented: $expanded, onDismiss: { zoomedIndices.removeAll() }) {
+            if times.indices.contains(selected) { gallery }
         }
     }
 
@@ -189,36 +201,54 @@ struct PreviewFilmstrip: View {
         .onDisappear { visibleIndices.remove(index) }
     }
 
-    private func gallery(_ metadata: TimelineMetadata) -> some View {
-        let requests = scenePhase == .active ? [request(at: metadata.sampleTime(at: selected))] : []
+    private var gallery: some View {
+        let requests = scenePhase == .active ? [request(at: times[selected])] : []
         return ZStack(alignment: .topTrailing) {
             Color.black.ignoresSafeArea()
             TabView(selection: $selected) {
-                ForEach(0..<min(30, metadata.frames ?? 0), id: \.self) { index in
-                    slide(metadata, index: index).tag(index)
+                ForEach(0..<times.count, id: \.self) { index in
+                    slide(index: index).tag(index)
                 }
-            }.tabViewStyle(.page(indexDisplayMode: .never))
+            }
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            .offset(y: galleryOffset)
             Button { expanded = false } label: { Image(systemName: "xmark").frame(width: 44, height: 44) }
                 .foregroundStyle(.white).padding().accessibilityLabel("关闭预览图")
         }
+        .simultaneousGesture(DragGesture(minimumDistance: 12)
+            .updating($galleryOffset) { value, offset, _ in
+                let drag = value.translation
+                if !zoomedIndices.contains(selected), drag.height > abs(drag.width) * 1.4 {
+                    offset = drag.height
+                }
+            }
+            .onEnded { value in
+                let drag = value.translation
+                if !zoomedIndices.contains(selected), drag.height >= 80, drag.height > abs(drag.width) * 1.4 {
+                    expanded = false
+                }
+            })
         .task(id: LoadID(frames: requests, retry: frameRetry)) {
             await loadOriginals(requests)
         }
     }
 
-    private func slide(_ metadata: TimelineMetadata, index: Int) -> some View {
-        let request = request(at: metadata.sampleTime(at: index))
+    private func slide(index: Int) -> some View {
+        let request = request(at: times[index])
         let state = frames[request.key]
         return VStack {
             switch state {
             case .image(let image):
-                ZoomableFrame(image: image)
+                ZoomableFrame(image: image) { zoomed in
+                    if zoomed { zoomedIndices.insert(index) }
+                    else { zoomedIndices.remove(index) }
+                }
             case .failed(let error):
                 Button("原图读取失败，重试") { retry(request) }.accessibilityHint(error)
             case nil:
                 ProgressView("正在加载原图…").controlSize(.small).tint(.white)
             }
-            Text("\(index + 1) / \(min(30, metadata.frames ?? 0)) · \(MediaClock.text(request.seconds))")
+            Text("\(index + 1) / \(times.count) · \(MediaClock.text(request.seconds))")
                 .font(.caption.monospacedDigit()).foregroundStyle(.white)
             if case .image(let image) = state, let pixels = image.cgImage {
                 Text("\(pixels.width) × \(pixels.height)")
@@ -228,7 +258,7 @@ struct PreviewFilmstrip: View {
         .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
     }
     private func request(at seconds: Double) -> FrameRequest {
-        let key = MediaCacheKey(url: api.baseURL, kind: .originalFrame, resource: "direct:\(item.mediaCacheIdentity):\(seconds)")
+        let key = PreviewSamplePlan.transientKey(origin: api.baseURL, item: item, time: seconds)
         return FrameRequest(seconds: seconds, key: key)
     }
 
@@ -244,7 +274,10 @@ struct PreviewFilmstrip: View {
         frames = frames.filter { keys.contains($0.key) }
         var misses: [FrameRequest] = []
         for request in requests where frames[request.key] == nil {
-            let data = await MediaDiskCache.shared.read(request.key)
+            let pinned = await OfflinePreviewStore.shared.frame(origin: api.baseURL, item: item, time: request.seconds)
+            let data: Data?
+            if let pinned { data = pinned }
+            else { data = await MediaDiskCache.shared.read(request.key) }
             guard !Task.isCancelled else { return }
             if let data, let image = UIImage(data: data) {
                 frames[request.key] = .image(image)
@@ -288,8 +321,9 @@ struct PreviewFilmstrip: View {
 
 private struct ZoomableFrame: UIViewRepresentable {
     let image: UIImage
+    let onZoom: (Bool) -> Void
 
-    func makeCoordinator() -> Coordinator { Coordinator() }
+    func makeCoordinator() -> Coordinator { Coordinator(onZoom: onZoom) }
 
     func makeUIView(context: Context) -> UIScrollView {
         let scroll = FrameScrollView()
@@ -313,11 +347,20 @@ private struct ZoomableFrame: UIViewRepresentable {
     }
 
     func updateUIView(_ view: UIScrollView, context: Context) {
+        context.coordinator.onZoom = onZoom
         if context.coordinator.imageView.image !== image { context.coordinator.imageView.image = image }
     }
 
     final class Coordinator: NSObject, UIScrollViewDelegate {
         let imageView = UIImageView()
+        var onZoom: (Bool) -> Void
+
+        init(onZoom: @escaping (Bool) -> Void) { self.onZoom = onZoom }
+
+        func scrollViewDidZoom(_ scrollView: UIScrollView) {
+            onZoom(scrollView.zoomScale > scrollView.minimumZoomScale + 0.01)
+        }
+
         func viewForZooming(in scrollView: UIScrollView) -> UIView? { imageView }
     }
 

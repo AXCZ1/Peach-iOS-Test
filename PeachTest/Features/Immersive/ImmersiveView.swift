@@ -21,6 +21,7 @@ struct ImmersiveView: View {
     @State private var detailItem: PeachItem?
     @State private var controlsVisible = true
     @StateObject private var orientation = PlaybackOrientation()
+    @State private var rotationAnchor: Int?
 
     var body: some View {
         ZStack {
@@ -33,7 +34,9 @@ struct ImmersiveView: View {
                     Button("关闭") { dismiss() }.buttonStyle(.borderedProminent).tint(PeachTheme.coral)
                 }.padding(30)
             } else {
-                pager
+                GeometryReader { safeArea in
+                    pager(insets: safeArea.safeAreaInsets).ignoresSafeArea()
+                }
             }
             if controlsVisible { closeButton }
             if let toast {
@@ -55,7 +58,9 @@ struct ImmersiveView: View {
                 }
             }
         }
+        .background(PlaybackWindowAnchor(orientation: orientation).allowsHitTesting(false))
         .statusBarHidden()
+        .persistentSystemOverlays(.hidden)
         .task { await load() }
         .onChange(of: currentID) { _, _ in requestRefill() }
         .onDisappear { refillTask?.cancel(); orientation.restore() }
@@ -73,26 +78,49 @@ struct ImmersiveView: View {
         }
     }
 
-    private var pager: some View {
-        GeometryReader { proxy in
-            ScrollView(.vertical) {
-                LazyVStack(spacing: 0) {
-                    ForEach(items) { item in
-                        ImmersivePage(api: api, item: item,
-                                      isActive: currentID == item.id && detailItem == nil,
-                                      controlsVisible: $controlsVisible,
-                                      onEnded: { if currentID == item.id { advance(1) } },
-                                      onOpenDetail: { detailItem = item },
-                                      onFeedback: { kind, count in feedback(kind, id: item.id, count: count) },
-                                      onAdvance: { advance($0) })
-                            .frame(width: proxy.size.width, height: proxy.size.height).id(item.id)
-                    }
-                }.scrollTargetLayout()
+    private func pager(insets: EdgeInsets) -> some View {
+        GeometryReader { viewport in
+            ScrollViewReader { reader in
+                ScrollView(.vertical) {
+                    LazyVStack(spacing: 0) {
+                        ForEach(items) { item in
+                            ImmersivePage(api: api, item: item,
+                                          isActive: currentID == item.id && detailItem == nil,
+                                          controlsVisible: $controlsVisible, insets: insets,
+                                          onEnded: { if currentID == item.id { advance(1) } },
+                                          onOpenDetail: { detailItem = item },
+                                          onFeedback: { kind, count, mark in feedback(kind, item: item, count: count, mark: mark) },
+                                          onAdvance: { advance($0) },
+                                          onRotate: { onError in rotate(from: viewport.size, onError: onError) })
+                                .frame(width: viewport.size.width, height: viewport.size.height)
+                                .clipped()
+                                .id(item.id)
+                        }
+                    }.scrollTargetLayout()
+                }
+                .scrollTargetBehavior(.paging)
+                .scrollPosition(id: Binding(get: { currentID }, set: { value in
+                    if rotationAnchor == nil, let value { currentID = value }
+                }), anchor: .top)
+                .scrollIndicators(.hidden)
+                .clipped()
+                .onChange(of: viewport.size) { _, _ in
+                    guard let id = rotationAnchor ?? currentID else { return }
+                    var transaction = Transaction(animation: nil)
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) { reader.scrollTo(id, anchor: .top) }
+                    rotationAnchor = nil
+                }
             }
-            .scrollTargetBehavior(.paging)
-            .scrollPosition(id: $currentID)
-            .scrollIndicators(.hidden)
-            .ignoresSafeArea()
+        }
+    }
+
+    private func rotate(from size: CGSize, onError: @escaping (String) -> Void) {
+        let targetLandscape = !orientation.landscape
+        if targetLandscape != (size.width > size.height) { rotationAnchor = currentID }
+        orientation.toggle { message in
+            rotationAnchor = nil
+            onError(message)
         }
     }
 
@@ -204,8 +232,9 @@ struct ImmersiveView: View {
         }
     }
 
-    private func feedback(_ kind: String, id: Int, count: Int) {
-        if let index = items.firstIndex(where: { $0.id == id }) {
+    private func feedback(_ kind: String, item: PeachItem, count: Int, mark: ClimaxMark?) {
+        let id = item.id
+        if kind == "o", let index = items.firstIndex(where: { $0.id == id }) {
             items[index] = items[index].replacing(oCount: count)
         }
         switch kind {
@@ -213,10 +242,9 @@ struct ImmersiveView: View {
             showToast("已记一次高潮 · \(count)", undo: {
                 Task {
                     do {
-                        let result = try await api.feedback(id: id, kind: "o-undo")
-                        let fresh = try await api.item(id: id)
+                        let count = try await ClimaxMarks.local.undo(api: api, item: item, mark: mark)
                         if let index = items.firstIndex(where: { $0.id == id }) {
-                            items[index] = fresh.replacing(oCount: result.oCount ?? fresh.oCount)
+                            items[index] = items[index].replacing(oCount: count)
                         }
                         showToast("已撤销")
                     } catch let failure {
@@ -250,10 +278,12 @@ private struct ImmersivePage: View {
     let item: PeachItem
     let isActive: Bool
     @Binding var controlsVisible: Bool
+    let insets: EdgeInsets
     let onEnded: () -> Void
     let onOpenDetail: () -> Void
-    let onFeedback: (String, Int) -> Void
+    let onFeedback: (String, Int, ClimaxMark?) -> Void
     let onAdvance: (Int) -> Void
+    let onRotate: (@escaping (String) -> Void) -> Void
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var controller: PlaybackController
     @StateObject private var presentation: PlayerPresentation
@@ -262,14 +292,18 @@ private struct ImmersivePage: View {
     @State private var detail: PeachItem?
     @State private var busy = false
     @State private var localCount: Int?
+    @State private var marks: [ClimaxMark] = []
     @State private var seekOrigin = 0.0
     @State private var gestureFeedback: String?
     @State private var feedbackID = UUID()
 
-    init(api: PeachAPI, item: PeachItem, isActive: Bool, controlsVisible: Binding<Bool>,
+    init(api: PeachAPI, item: PeachItem, isActive: Bool, controlsVisible: Binding<Bool>, insets: EdgeInsets,
          onEnded: @escaping () -> Void, onOpenDetail: @escaping () -> Void,
-         onFeedback: @escaping (String, Int) -> Void, onAdvance: @escaping (Int) -> Void) {
+         onFeedback: @escaping (String, Int, ClimaxMark?) -> Void, onAdvance: @escaping (Int) -> Void,
+         onRotate: @escaping (@escaping (String) -> Void) -> Void) {
         self.api = api; self.item = item; self.isActive = isActive
+        self.insets = insets
+        self.onRotate = onRotate
         _controlsVisible = controlsVisible
         self.onEnded = onEnded; self.onOpenDetail = onOpenDetail
         self.onFeedback = onFeedback; self.onAdvance = onAdvance
@@ -291,7 +325,7 @@ private struct ImmersivePage: View {
             ZStack {
                 Color.black
                 if controller.hasVideoSurface {
-                    SessionVideoSurface(session: presentation).ignoresSafeArea()
+                    SessionVideoSurface(session: presentation)
                 } else if !isActive {
                     RemoteImage(url: api.coverURL(code: current.coverKey.isEmpty ? current.displayNumber : current.coverKey))
                         .blur(radius: 12).overlay(Color.black.opacity(0.55))
@@ -363,13 +397,17 @@ private struct ImmersivePage: View {
                                 modeButton(orientation.landscape ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
                                            orientation.landscape ? "返回竖屏" : "横屏全屏") {
                                     controller.endBoost()
-                                    orientation.toggle { showGesture("屏幕切换失败：\($0)") }
+                                    onRotate { showGesture("屏幕切换失败：\($0)") }
                                 }
                             }.padding(.horizontal, 16)
-                            PlaybackSeekBar(controller: controller, api: api, item: current)
+                            PlaybackSeekBar(controller: controller, api: api, item: item,
+                                            usesOfflineOriginals: true, marks: marks)
                                 .padding(.horizontal, 20).padding(.bottom, 16)
                         }
                     }
+                    .padding(.leading, insets.leading)
+                    .padding(.trailing, insets.trailing)
+                    .padding(.bottom, insets.bottom)
                 }
             }
         }
@@ -384,7 +422,10 @@ private struct ImmersivePage: View {
         .onChange(of: controller.isPlaying) { _, playing in
             if playing { controlsVisible = false }
         }
-        .onChange(of: item.oCount) { _, count in localCount = count }
+        .onChange(of: item.oCount, initial: true) { _, count in
+            localCount = count
+            marks = ClimaxMarks.local.list(origin: api.baseURL, item: item)
+        }
         .onDisappear { presentation.disappear() }
         .onChange(of: presentation.message) { _, message in if let message { showGesture(message) } }
         .task(id: item.id) {
@@ -409,15 +450,22 @@ private struct ImmersivePage: View {
         Button {
             guard !busy else { return }
             busy = true
+            let position = controller.climaxPosition
             Task {
                 defer { busy = false }
                 do {
-                    let result = try await api.feedback(id: item.id, kind: kind)
-                    if let fresh = try? await api.item(id: item.id) { detail = fresh }
-                    if kind == "o", let count = result.oCount { localCount = count }
-                    onFeedback(kind, result.oCount ?? current.oCount)
+                    if kind == "o" {
+                        let (count, mark) = try await ClimaxMarks.local.record(api: api, item: item, at: position)
+                        localCount = count
+                        marks = ClimaxMarks.local.list(origin: api.baseURL, item: item)
+                        onFeedback(kind, count, mark)
+                    } else {
+                        let result = try await api.feedback(id: item.id, kind: kind)
+                        if let fresh = try? await api.item(id: item.id) { detail = fresh }
+                        onFeedback(kind, result.oCount ?? current.oCount, nil)
+                    }
                 } catch let failure {
-                    onFeedback("写入失败：\(failure.localizedDescription)", current.oCount)
+                    onFeedback("写入失败：\(failure.localizedDescription)", current.oCount, nil)
                 }
             }
         } label: {

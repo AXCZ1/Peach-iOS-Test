@@ -106,7 +106,7 @@ actor MediaDiskCache {
         usage[directory] = bytes
     }
 
-    private static func filename(_ value: String) -> String {
+    static func filename(_ value: String) -> String {
         // Stable across launches; these names index app-owned cache files only.
         let hash = value.utf8.reduce(UInt64(14695981039346656037)) { ($0 ^ UInt64($1)) &* 1099511628211 }
         return String(hash, radix: 16)

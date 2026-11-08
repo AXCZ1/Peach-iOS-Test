@@ -284,6 +284,8 @@ final class PlaybackController: ObservableObject {
         firstFrameTask = nil
     }
 
+    var climaxPosition: Double? { isScrubbing ? nil : reportingPosition }
+
     func seek(to time: Double, completion: (() -> Void)? = nil) {
         guard hasVideoSurface else { completion?(); return }
         seekPreview = nil

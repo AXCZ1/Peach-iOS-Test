@@ -140,11 +140,18 @@ struct PlaybackSeekBar: View {
     let api: PeachAPI
     let item: PeachItem
     var inlineTimes = false
+    var usesOfflineOriginals = false
+    var marks: [ClimaxMark] = []
+    @State private var originals: [OfflinePreviewStore.Entry] = []
     @State private var dragging = false
     @State private var value = 0.0
 
     private var shownTime: Double { dragging ? value : (controller.seekPreview ?? controller.currentTime) }
     private var fraction: Double { min(1, max(0, shownTime / max(controller.duration, 1))) }
+
+    private var nearestOriginal: OfflinePreviewStore.Entry? {
+        originals.min { abs($0.time - shownTime) < abs($1.time - shownTime) }
+    }
 
     var body: some View {
         Group {
@@ -165,6 +172,11 @@ struct PlaybackSeekBar: View {
                 }
             }
         }
+        .task(id: item.mediaCacheIdentity) {
+            guard usesOfflineOriginals else { return }
+            let available = await OfflinePreviewStore.shared.entries(origin: api.baseURL, item: item)
+            if !Task.isCancelled { originals = available }
+        }
         .onChange(of: controller.isScrubbing) { _, scrubbing in
             if !scrubbing { dragging = false }
         }
@@ -182,6 +194,13 @@ struct PlaybackSeekBar: View {
             ZStack(alignment: .leading) {
                 Capsule().fill(.white.opacity(0.25)).frame(height: 3)
                 Capsule().fill(PeachTheme.coral).frame(width: geometry.size.width * fraction, height: 3)
+                if controller.duration > 0 {
+                    ForEach(marks.filter { $0.seconds <= controller.duration }) { mark in
+                        Circle().fill(PeachTheme.amber).frame(width: 6, height: 6)
+                            .position(x: markerX(mark, width: geometry.size.width), y: 22)
+                            .allowsHitTesting(false)
+                    }
+                }
                 Circle().fill(.white).frame(width: 12, height: 12)
                     .offset(x: max(0, (geometry.size.width - 12) * fraction))
             }
@@ -193,9 +212,14 @@ struct PlaybackSeekBar: View {
                     if !dragging { dragging = true; controller.beginScrubbing() }
                     value = controller.duration * min(1, max(0, gesture.location.x / max(1, geometry.size.width)))
                 }
-                .onEnded { _ in
+                .onEnded { gesture in
                     guard dragging else { return }
-                    controller.endScrubbing(at: value)
+                    let dx = gesture.translation.width
+                    let dy = gesture.translation.height
+                    let point = gesture.location
+                    let mark = hypot(dx, dy) <= 8 && abs(point.y - 22) <= 16
+                        ? tappedMark(x: point.x, width: geometry.size.width) : nil
+                    controller.endScrubbing(at: mark?.seconds ?? value)
                     dragging = false
                 })
             .accessibilityElement()
@@ -205,11 +229,66 @@ struct PlaybackSeekBar: View {
                 controller.skip(by: direction == .increment ? 10 : -10)
             }
 
+            .accessibilityActions {
+                ForEach(marks.filter { $0.seconds <= controller.duration }) { mark in
+                    Button("跳到记录点 \(MediaClock.text(mark.seconds))") { controller.seek(to: mark.seconds) }
+                }
+            }
+
             if dragging || controller.seekPreview != nil {
-                SeekThumbnail(api: api, item: item, time: shownTime, duration: controller.duration)
-                    .position(x: min(max(80, geometry.size.width * fraction), max(80, geometry.size.width - 80)), y: -60)
+                Group {
+                    if usesOfflineOriginals {
+                        OfflineSeekThumbnail(entry: nearestOriginal, time: shownTime)
+                    } else {
+                        SeekThumbnail(api: api, item: item, time: shownTime, duration: controller.duration)
+                    }
+                }
+                .position(x: min(max(80, geometry.size.width * fraction), max(80, geometry.size.width - 80)), y: -60)
             }
         }
         .frame(height: 44)
+    }
+
+    private func markerX(_ mark: ClimaxMark, width: CGFloat) -> CGFloat {
+        width * min(1, max(0, mark.seconds / max(controller.duration, 1)))
+    }
+
+    private func tappedMark(x: CGFloat, width: CGFloat) -> ClimaxMark? {
+        marks.filter { $0.seconds <= controller.duration && abs(markerX($0, width: width) - x) <= 12 }
+            .min { abs(markerX($0, width: width) - x) < abs(markerX($1, width: width) - x) }
+    }
+}
+
+private struct OfflineSeekThumbnail: View {
+    let entry: OfflinePreviewStore.Entry?
+    let time: Double
+    @State private var frame: UIImage?
+    @State private var loadedURL: URL?
+
+    var body: some View {
+        VStack(spacing: 4) {
+            if let entry, loadedURL == entry.url, let frame {
+                Image(uiImage: frame).resizable().scaledToFit()
+                    .frame(width: 160, height: 90)
+                    .background(.black)
+                    .clipShape(RoundedRectangle(cornerRadius: 9))
+                    .overlay(RoundedRectangle(cornerRadius: 9).stroke(.white.opacity(0.65)))
+            }
+            Text(MediaClock.text(time)).font(.caption2.monospacedDigit().weight(.semibold))
+                .foregroundStyle(.white).padding(.horizontal, 7).padding(.vertical, 3)
+                .background(.black.opacity(0.8), in: Capsule())
+        }
+        .frame(width: 160)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+        .task(id: entry?.url) {
+            let url = entry?.url
+            let bytes = await Task.detached(priority: .userInitiated) {
+                url.flatMap { try? Data(contentsOf: $0, options: .mappedIfSafe) }
+            }.value
+            guard !Task.isCancelled else { return }
+            frame = bytes.flatMap { UIImage(data: $0) }
+            loadedURL = url
+        }
     }
 }

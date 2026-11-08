@@ -7,6 +7,7 @@ struct FilterSheet: View {
     @State private var tag = ""
     @State private var performer = ""
     @State private var studio = ""
+    @State private var draft = LibraryFilter()
     @State private var studios: [PeachFacet] = []
     @State private var isLoadingIndex = false
 
@@ -51,27 +52,18 @@ struct FilterSheet: View {
                     }
                 }
                 Section("状态与排序") {
-                    Picker("状态", selection: Binding(
-                        get: { model.filter.state },
-                        set: { model.filter.state = $0 }
-                    )) {
+                    Picker("状态", selection: $draft.state) {
                         ForEach(CatalogState.allCases) { state in
                             Text(state.label).tag(state)
                         }
                     }
-                    Picker("排序", selection: Binding(
-                        get: { model.filter.sort },
-                        set: { model.filter.sort = $0 }
-                    )) {
+                    Picker("排序", selection: $draft.sort) {
                         ForEach(CatalogSort.allCases) { sort in
                             Text(sort.label).tag(sort)
                         }
                     }
-                    if model.filter.sort.supportsDirection {
-                        Toggle("升序", isOn: Binding(
-                            get: { model.filter.ascending },
-                            set: { model.filter.ascending = $0 }
-                        ))
+                    if draft.sort.supportsDirection {
+                        Toggle("升序", isOn: $draft.ascending)
                     }
                 }
                 Section {
@@ -100,6 +92,7 @@ struct FilterSheet: View {
                 }
             }
             .onAppear {
+                draft = model.filter
                 query = model.filter.query
                 tag = model.filter.tag ?? ""
                 performer = model.filter.performer ?? ""
@@ -111,13 +104,13 @@ struct FilterSheet: View {
     }
 
     private func apply() {
-        model.filter.query = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        model.filter.tag = tag.isEmpty ? nil : tag
-        model.filter.performer = performer.isEmpty ? nil : performer
+        draft.query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        draft.tag = tag.isEmpty ? nil : tag
+        draft.performer = performer.isEmpty ? nil : performer
         let s = studio.trimmingCharacters(in: .whitespacesAndNewlines)
-        model.filter.studio = s.isEmpty ? nil : s
+        draft.studio = s.isEmpty ? nil : s
         Task {
-            await model.reload()
+            await model.applySheet(draft)
             dismiss()
         }
     }

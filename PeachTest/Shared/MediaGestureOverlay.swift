@@ -15,6 +15,9 @@ struct MediaGestureOverlay: UIViewRepresentable {
     var onSeekCancelled: () -> Void = {}
     var onHoldBegan: () -> Void = {}
     var onHoldEnded: () -> Void = {}
+    var allowsDownwardDismiss = false
+    var onDismissChanged: (CGFloat) -> Void = { _ in }
+    var onDismissEnded: (Bool) -> Void = { _ in }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -43,6 +46,7 @@ struct MediaGestureOverlay: UIViewRepresentable {
 
 final class GestureView: UIView, UIGestureRecognizerDelegate {
     weak var coordinator: MediaGestureOverlay.Coordinator?
+    private var dismissPan = false
     private var pan: UIPanGestureRecognizer?
     private var single: UITapGestureRecognizer?
     private var double: UITapGestureRecognizer?
@@ -73,9 +77,10 @@ final class GestureView: UIView, UIGestureRecognizerDelegate {
 
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return true }
-        guard coordinator?.parent.allowsHorizontalSeek == true else { return false }
+        guard let parent = coordinator?.parent else { return false }
         let velocity = pan.velocity(in: self)
-        return abs(velocity.x) > abs(velocity.y) * 1.4
+        dismissPan = parent.allowsDownwardDismiss && velocity.y > abs(velocity.x) * 1.4
+        return dismissPan || (parent.allowsHorizontalSeek && abs(velocity.x) > abs(velocity.y) * 1.4)
     }
 
     @objc private func handleHold(_ recognizer: UILongPressGestureRecognizer) {
@@ -95,14 +100,25 @@ final class GestureView: UIView, UIGestureRecognizerDelegate {
     }
 
     @objc private func handlePan(_ recognizer: UIPanGestureRecognizer) {
-        let translation = recognizer.translation(in: self).x
+        // Use the parent as the coordinate space while the player follows the finger.
+        let translation = recognizer.translation(in: superview)
+        if dismissPan {
+            switch recognizer.state {
+            case .began, .changed: coordinator?.parent.onDismissChanged(max(0, translation.y))
+            case .ended: coordinator?.parent.onDismissEnded(translation.y >= 80)
+            case .cancelled, .failed: coordinator?.parent.onDismissEnded(false)
+            default: break
+            }
+            return
+        }
+        let distance = translation.x
         switch recognizer.state {
         case .began:
             coordinator?.parent.onSeekBegan()
         case .changed:
-            coordinator?.parent.onSeekChanged(translation)
+            coordinator?.parent.onSeekChanged(distance)
         case .ended:
-            coordinator?.parent.onSeekEnded(translation)
+            coordinator?.parent.onSeekEnded(distance)
         case .cancelled, .failed:
             coordinator?.parent.onSeekCancelled()
         default:

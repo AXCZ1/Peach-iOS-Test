@@ -4,6 +4,7 @@ struct AccountHubView: View {
     let api: PeachAPI
     @ObservedObject var session: PeachSession
     let libraryCount: Int
+    @EnvironmentObject private var offlinePreviews: OfflinePreviewScan
     @State private var clearingCache = false
     @State private var cacheNotice: String?
 
@@ -33,8 +34,18 @@ struct AccountHubView: View {
                 if let notice = session.credentialNotice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
             }
             Section("本机缓存") {
+                Toggle("扫描并缓存全部预览图", isOn: Binding(
+                    get: { offlinePreviews.enabled },
+                    set: { offlinePreviews.setEnabled($0, api: api) }
+                ))
+                .disabled(clearingCache || (offlinePreviews.running && !offlinePreviews.enabled))
+                LabeledContent("预览原图占用", value: ByteCountFormatter.string(
+                    fromByteCount: offlinePreviews.bytes, countStyle: .file))
+                if let status = offlinePreviews.status {
+                    Text(status).font(.footnote).foregroundStyle(.secondary)
+                }
                 Button("清除封面、预览图和视频片段缓存") { Task { await clearCache() } }
-                    .disabled(clearingCache)
+                    .disabled(clearingCache || offlinePreviews.enabled || offlinePreviews.running)
                 if let cacheNotice { Text(cacheNotice).font(.footnote).foregroundStyle(.secondary) }
             }
             Section {
@@ -45,6 +56,7 @@ struct AccountHubView: View {
         .background(PeachTheme.background)
         .foregroundStyle(.white)
         .padding(.bottom, 70)
+        .task(id: api.baseURL) { await offlinePreviews.refreshSize(for: api) }
         .navigationTitle("我的")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(PeachTheme.background, for: .navigationBar)
@@ -55,6 +67,8 @@ struct AccountHubView: View {
         clearingCache = true
         defer { clearingCache = false }
         do {
+            try await OfflinePreviewStore.shared.clear(origin: api.baseURL)
+            await offlinePreviews.refreshSize(for: api)
             try await PeachImageCache.shared.clear(origin: api.baseURL)
             cacheNotice = "已清除"
         } catch { cacheNotice = "清除失败：\(error.localizedDescription)" }

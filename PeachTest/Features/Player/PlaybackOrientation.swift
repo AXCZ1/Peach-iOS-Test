@@ -13,6 +13,7 @@ final class PeachAppDelegate: NSObject, UIApplicationDelegate {
 final class PlaybackOrientation: ObservableObject {
     fileprivate static weak var owner: PlaybackOrientation?
     fileprivate weak var scene: UIWindowScene?
+    weak var playbackWindow: UIWindow?
     @Published private(set) var landscape = false
     private var previous: UIInterfaceOrientationMask = .portrait
 
@@ -21,7 +22,7 @@ final class PlaybackOrientation: ObservableObject {
             release(to: .portrait, onError: onError)
             return
         }
-        guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene })
+        guard let scene = playbackWindow?.windowScene ?? UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene })
             .first(where: { $0.activationState == .foregroundActive && $0.windows.contains(where: \.isKeyWindow) }) else {
             onError("播放器窗口尚未准备好")
             return
@@ -57,10 +58,34 @@ final class PlaybackOrientation: ObservableObject {
     }
 
     private func updateControllers(in scene: UIWindowScene) {
-        var controller = scene.windows.first(where: \.isKeyWindow)?.rootViewController
+        var controller = (playbackWindow ?? scene.windows.first(where: \.isKeyWindow))?.rootViewController
         while let current = controller {
             current.setNeedsUpdateOfSupportedInterfaceOrientations()
             controller = current.presentedViewController
+        }
+    }
+}
+
+struct PlaybackWindowAnchor: UIViewRepresentable {
+    let orientation: PlaybackOrientation
+
+    func makeUIView(context: Context) -> Anchor {
+        let view = Anchor()
+        view.orientation = orientation
+        return view
+    }
+
+    func updateUIView(_ view: Anchor, context: Context) {
+        view.orientation = orientation
+        if let window = view.window { orientation.playbackWindow = window }
+    }
+
+    final class Anchor: UIView {
+        weak var orientation: PlaybackOrientation?
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            if let window { orientation?.playbackWindow = window }
         }
     }
 }
