@@ -1,5 +1,12 @@
 # 当前继续点（2026-11-08）
 
+独立 App **构建 27** 已校验并放入 Downloads，待 iPhone 复测 SONE-081。VLC 起播已收到数据但未输出首帧时，使用同一原文件在手机上以软件解码重试一次。其余播放和预览仍用原文件。
+
+- IPA：C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.27.ipa；源码 `9f81cd04eaa3207cccbc1e2c6700f186c5321878`，Codemagic `6aefe2910e0f7ecdb5f76a2b`。只读排查、回归和真机步骤见 ACCEPTANCE.md 首节。
+- 保留构建 26 IPA 回退。
+
+## 构建 26 历史
+
 独立 App **构建 26** 已校验并放入 Downloads，待 iPhone 验收。详情提前缓存原图；大图静音片段和详情取帧都已切到原文件，由 iPhone 解码。普通播放、沉浸及播放墙继续读原文件。
 
 - IPA：C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.26.ipa；源码 `9736b8818d1b184d04769a60b1c0c32f14425407`，Codemagic `6aef8a454b804ab4e2e0ea3a`。校验和真机步骤见 ACCEPTANCE.md 首节。

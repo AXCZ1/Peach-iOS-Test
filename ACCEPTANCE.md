@@ -1,3 +1,15 @@
+# Peach iOS Test — 构建 27 验收
+
+安装包：[Peach-iOS-Test-unsigned.27.ipa](C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.27.ipa)，20,917,350 字节，无签名 iPhone ARM64，iOS 17.0+。SHA256 `8f93c70a5b84d87e599b0a0c92ac98f229a2315c5e5a335fb62fbe54e00d3407`。源码 `9f81cd04eaa3207cccbc1e2c6700f186c5321878`；Codemagic `6aefe2910e0f7ecdb5f76a2b`。本机校验和云端日志见 `artifacts/codemagic-27/`。
+
+- SONE-081 真机症状：播放页打开，但未出首帧。该文件为 3840×2160、59.94 fps H.264/AAC MKV。只读核对原文件头、中、尾均为 HTTP 206；电脑走同一 HTTPS 域名解出前 120 帧，无解码错误。没有手机 VLC 的原始失败日志。
+- `LocalOriginalPlayer.swift`、`VLCOriginalPlayer.swift`、`PlaybackController.swift`：正式播放已读到媒体数据却没有首帧时，用同一原文件在 iPhone 上切换软件解码一次，保留续播和静音状态。失败时结束加载并显示错误。成功起播、播放墙控件、详情预取和服务端配置沿用原行为。
+- `OriginalPlaybackTests.swift`、`PlaybackLifecycleTests.swift`：覆盖同一票和会话、续播位置、单次重试、无首帧不记观看、网络失败不换解码器；原文件播放、画中画会话和预览回归随工作流运行。Debug/Release 各 52 通过、3 跳过；iPhone Release 编译和本机 IPA 校验通过。
+
+真机待验收：覆盖安装后，从详情播放 SONE-081。若第一次没有画面，观察标题下方是否出现「原文件直放 · VLC 软件解码」，随后确认画面和声音。如仍失败，记下错误文字。再从播放墙试同一部，回归一部原先正常播放的影片。构建 26 保留回退。
+
+---
+
 # Peach iOS Test — 构建 26 验收
 
 安装包：[Peach-iOS-Test-unsigned.26.ipa](C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.26.ipa)，20,916,539 字节，无签名 iPhone ARM64，iOS 17.0+。SHA256 `c7891cca8b57731240a605a7a9b6576b8fe5b561018a1db22b95716d55dd749d`。源码 `9736b8818d1b184d04769a60b1c0c32f14425407`；Codemagic `6aef8a454b804ab4e2e0ea3a`。本机校验和云端日志见 `artifacts/codemagic-26/`。
