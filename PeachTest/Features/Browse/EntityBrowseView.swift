@@ -77,7 +77,9 @@ struct EntityBrowseView: View {
                 .refreshable { await load() }
             }
         }
-        .task { await load() }
+        .task {
+            if loading || error != nil { await load() }
+        }
     }
 
     private func load() async {
@@ -87,10 +89,10 @@ struct EntityBrowseView: View {
         error = nil
         do {
             let result = try await api.index(kind: requestedKind.apiKind, query: requestedQuery)
-            guard kind == requestedKind, query == requestedQuery else { return }
+            guard !Task.isCancelled, kind == requestedKind, query == requestedQuery else { return }
             items = result
         } catch let failure {
-            guard kind == requestedKind, query == requestedQuery else { return }
+            guard !Task.isCancelled, kind == requestedKind, query == requestedQuery else { return }
             error = failure.localizedDescription
         }
         loading = false
@@ -177,7 +179,9 @@ struct EntityDetailView: View {
         .navigationTitle(name)
         .toolbarBackground(PeachTheme.background, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
-        .task { await load() }
+        .task {
+            if loading || error != nil { await load() }
+        }
     }
 
     private var header: some View {
@@ -244,11 +248,14 @@ struct EntityDetailView: View {
             default: break
             }
             let loaded = try await api.entity(kind: kind, name: name)
-            entity = loaded
-            items = try await api.items(filter, offset: 0, limit: 60).items
+            let loadedItems = try await api.items(filter, offset: 0, limit: 60).items
             let shortcuts = try? await api.libraryShortcuts()
+            guard !Task.isCancelled else { return }
+            entity = loaded
+            items = loadedItems
             favorite = shortcuts?.favorites.contains { $0.entityID == loaded.id } ?? false
         } catch let failure {
+            guard !Task.isCancelled else { return }
             error = failure.localizedDescription
         }
         loading = false
