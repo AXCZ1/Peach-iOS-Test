@@ -1,4 +1,8 @@
-# 当前继续点（2026-11-09）
+# 当前继续点（2026-11-10）
+
+独立 Peach App **构建 31** 已校验并交付到 `C:/Users/mo/Downloads/NAS-unsigned .31.ipa`。索引和分类作品列表在返回时复用已加载的数据。源码 `2a662f6738ca0809ec3e31a5cc9056457b3a3aea`，Codemagic `6af1fca97be2a39892c9a83f`。真机待确认滚动位置，见 ACCEPTANCE.md 首节。
+
+## 构建 30 历史
 
 独立 App **构建 30** 已校验并交付到 `C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.30.ipa`。整库扫描现在显示逐张进度，同一部连续两张取帧失败后先继续下一部，保留已存原图以便补缺。源码 `55b4c2d8a76fc7ed4b3de0aed936ca973782a2fd`，Codemagic `6af16f297cd45783ed247d73`。待 iPhone 复测，见 ACCEPTANCE.md 首节。
 

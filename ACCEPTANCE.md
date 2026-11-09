@@ -1,3 +1,11 @@
+# 构建 31 · 索引返回保留滚动位置
+
+独立 Peach 安装包为 [NAS-unsigned .31.ipa](<C:/Users/mo/Downloads/NAS-unsigned .31.ipa>)，21,022,952 字节，SHA256 `390bec1a8d7231f06e04e152e034a829e05a6f15b2022e90fb9ab419d32020c6`。源码 `2a662f6738ca0809ec3e31a5cc9056457b3a3aea`，Codemagic `6af1fca97be2a39892c9a83f`。
+
+`EntityBrowseView.swift` 让索引网格和分类内的作品列表在返回时复用已加载数据。已检查分类切换、提交搜索、下拉刷新及初次加载的代码路径。Debug 和 Release 各 56 项通过、4 项跳过，iPhone ARM64 Release 编译与 IPA 校验通过。
+
+真机待验收。在索引中滚动到较靠后的分类，打开后再滚动到较靠后的作品。分别用返回按钮和侧滑从作品详情返回，确认作品列表位置保留，再退回索引确认分类网格的位置保留。最后复查分类切换、搜索和下拉刷新。
+
 # 构建 30 · 整库原图扫描续做
 
 独立安装包为 [Peach-iOS-Test-unsigned.30.ipa](C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.30.ipa)，21,022,277 字节，SHA256 `81b37f80ca54d85826df2c3830560d41b0d1ef337a14973d34f2c7e582bff34a`。源码 `55b4c2d8a76fc7ed4b3de0aed936ca973782a2fd`，Codemagic `6af16f297cd45783ed247d73`，验证记录见 `artifacts/codemagic-30/`。Downloads 中已有同号 NAS 文件，因此安装包使用 Peach 文件名。
