@@ -53,6 +53,25 @@ enum OfflineCatalog {
     }
 }
 
+struct OfflinePreviewWorkProgress {
+    private(set) var saved: Int
+    private(set) var consecutiveFailures = 0
+    private(set) var hadFailures = false
+
+    init(saved: Int) { self.saved = saved }
+
+    mutating func recordSaved() {
+        saved += 1
+        consecutiveFailures = 0
+    }
+
+    mutating func recordFailure() -> Bool {
+        hadFailures = true
+        consecutiveFailures += 1
+        return consecutiveFailures >= 2
+    }
+}
+
 actor OfflinePreviewStore {
     static let shared = OfflinePreviewStore(root: FileManager.default.urls(for: .applicationSupportDirectory,
         in: .userDomainMask)[0].appendingPathComponent("PeachOfflinePreviews", isDirectory: true))
@@ -60,6 +79,15 @@ actor OfflinePreviewStore {
     struct Index: Codable, Equatable, Sendable {
         let identity: String
         let times: [Double]
+        var resumeAfter: Double? = nil
+
+        func pendingTimes(saved: Set<Double>) -> [Double] {
+            guard let resumeAfter, let previous = times.firstIndex(of: resumeAfter) else {
+                return times.filter { !saved.contains($0) }
+            }
+            let next = times.index(after: previous)
+            return (Array(times[next...]) + Array(times[..<next])).filter { !saved.contains($0) }
+        }
     }
 
     struct Entry: Equatable, Sendable {
@@ -89,14 +117,26 @@ actor OfflinePreviewStore {
         values.isExcludedFromBackup = true
         try root.setResourceValues(values)
         #endif
-        let data = try JSONEncoder().encode(Index(identity: item.mediaCacheIdentity, times: times))
-        try data.write(to: dir.appendingPathComponent("index.json"), options: .atomic)
+        let resumeAfter = index(origin: origin, item: item)?.resumeAfter
+        try writeIndex(Index(identity: item.mediaCacheIdentity, times: times, resumeAfter: resumeAfter), to: dir)
         // New-version files have their own directory so a replaced video never reads its old frames.
         for old in try FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.isDirectoryKey])
             where old.lastPathComponent != files.lastPathComponent &&
                   (try? old.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
             try FileManager.default.removeItem(at: old)
         }
+    }
+
+    func deferRemaining(after time: Double, origin: URL, item: PeachItem) throws {
+        try Task.checkCancellation()
+        guard var index = index(origin: origin, item: item) else { return }
+        index.resumeAfter = time
+        try writeIndex(index, to: work(origin, item.id))
+    }
+
+    private func writeIndex(_ index: Index, to directory: URL) throws {
+        let data = try JSONEncoder().encode(index)
+        try data.write(to: directory.appendingPathComponent("index.json"), options: .atomic)
     }
 
     func entries(origin: URL, item: PeachItem) -> [Entry] {

@@ -80,7 +80,9 @@ final class OfflinePreviewScan: ObservableObject {
         var failures = 0
         for (offset, item) in items.enumerated() {
             try Task.checkCancellation()
-            status = "已处理 \(offset) / \(items.count) 部 · 未完成 \(failures) 部"
+            let progress = "已处理 \(offset) / \(items.count) 部 · 未完成 \(failures) 部"
+            let title = item.displayNumber.isEmpty ? item.name : item.displayNumber
+            status = "\(progress)\n\(title) · 正在读取预览索引"
             let cached = await store.entries(origin: origin, item: item)
             let index = await store.index(origin: origin, item: item)
             if let index, !index.times.isEmpty, cached.count == index.times.count { continue }
@@ -98,10 +100,12 @@ final class OfflinePreviewScan: ObservableObject {
             guard !times.isEmpty else { failures += 1; continue }
             try await store.prepare(origin: origin, item: item, times: times)
             var reader: OriginalFrameReader?
-            var incomplete = false
+            var work = OfflinePreviewWorkProgress(saved: cached.count)
             let saved = Set(cached.map(\.time))
-            for time in times where !saved.contains(time) {
+            let pending = index?.pendingTimes(saved: saved) ?? times.filter { !saved.contains($0) }
+            for (offset, time) in pending.enumerated() {
                 try Task.checkCancellation()
+                status = "\(progress)\n\(title) · 已缓存 \(work.saved) / \(times.count) 张 · 正在取第 \(offset + 1) / \(pending.count) 张缺图"
                 let key = PreviewSamplePlan.transientKey(origin: origin, item: item, time: time)
                 let data: Data
                 if let existing = await MediaDiskCache.shared.read(key), UIImage(data: existing) != nil {
@@ -110,7 +114,7 @@ final class OfflinePreviewScan: ObservableObject {
                     if reader == nil {
                         do { reader = try await OriginalFrameReader(api: api, item: item) }
                         catch let error as PeachAPIError where [404, 409, 503].contains(error.status ?? 0) {
-                            incomplete = true
+                            _ = work.recordFailure()
                             break
                         }
                     }
@@ -122,17 +126,22 @@ final class OfflinePreviewScan: ObservableObject {
                     } catch {
                         try Task.checkCancellation()
                         if (error as NSError).domain == NSURLErrorDomain { throw error }
-                        incomplete = true
+                        if work.recordFailure() {
+                            try await store.deferRemaining(after: time, origin: origin, item: item)
+                            break
+                        }
                         continue
                     }
                 }
                 try await store.save(data, origin: origin, item: item, time: time)
                 bytes += Int64(data.count)
+                work.recordSaved()
             }
-            if incomplete { failures += 1 }
+            if work.hadFailures { failures += 1 }
         }
         try Task.checkCancellation()
         try await store.prune(origin: origin, retaining: Set(items.map(\.id)))
         status = "已扫描 \(items.count) 部 · 未完成 \(failures) 部"
+        if failures > 0 { status?.append("\n再次开启扫描可补缺") }
     }
 }

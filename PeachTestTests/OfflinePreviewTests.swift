@@ -83,6 +83,32 @@ final class OfflinePreviewTests: XCTestCase {
         XCTAssertNil(oldFrame)
     }
 
+    func testRepeatedFailuresYieldAndNextScanStartsAfterTheFailedFrames() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let origin = URL(string: "https://peach.example")!
+        let movie = try item(1)
+        let store = OfflinePreviewStore(root: root)
+        let times: [Double] = [1, 2, 3, 4, 5, 6]
+        try await store.prepare(origin: origin, item: movie, times: times)
+        var progress = OfflinePreviewWorkProgress(saved: 0)
+        XCTAssertFalse(progress.recordFailure()) // frame 1
+        try await store.save(Data([2]), origin: origin, item: movie, time: 2)
+        progress.recordSaved()
+        XCTAssertFalse(progress.recordFailure()) // frame 3
+        XCTAssertTrue(progress.recordFailure()) // frame 4
+        XCTAssertEqual(progress.saved, 1)
+        XCTAssertTrue(progress.hadFailures)
+        try await store.deferRemaining(after: 4, origin: origin, item: movie)
+
+        let reopened = OfflinePreviewStore(root: root)
+        try await reopened.prepare(origin: origin, item: movie, times: times)
+        let index = await reopened.index(origin: origin, item: movie)
+        let saved = await reopened.entries(origin: origin, item: movie)
+        XCTAssertEqual(saved.map(\.time), [2])
+        XCTAssertEqual(index?.pendingTimes(saved: Set(saved.map(\.time))), [5, 6, 1, 3, 4])
+    }
+
     private func item(_ id: Int, size: Int = 1) throws -> PeachItem {
         try JSONDecoder().decode(PeachItem.self,
             from: Data(#"{"id":\#(id),"name":"fixture.mp4","size":\#(size)}"#.utf8))
