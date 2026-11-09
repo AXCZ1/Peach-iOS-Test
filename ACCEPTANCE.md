@@ -1,3 +1,11 @@
+# 构建 30 · 整库原图扫描续做
+
+独立安装包为 [Peach-iOS-Test-unsigned.30.ipa](C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.30.ipa)，21,022,277 字节，SHA256 `81b37f80ca54d85826df2c3830560d41b0d1ef337a14973d34f2c7e582bff34a`。源码 `55b4c2d8a76fc7ed4b3de0aed936ca973782a2fd`，Codemagic `6af16f297cd45783ed247d73`，验证记录见 `artifacts/codemagic-30/`。Downloads 中已有同号 NAS 文件，因此安装包使用 Peach 文件名。
+
+`OfflinePreviewScan.swift` 显示当前作品和帧进度。连续两张取帧失败后，先处理下一部。`OfflinePreviews.swift` 保留已存原图并记录续扫位置。`OfflinePreviewTests.swift` 覆盖失败后续扫、已存帧复用，以及成功后重置连续失败计数。Debug 和 Release 各 56 项通过、4 项跳过，iPhone ARM64 Release 编译和 IPA 校验通过。
+
+真机待验收。覆盖安装后打开「我的 → 本机缓存」扫描，确认已存原图可以复用，当前作品显示逐张进度。遇到连续失败的作品时确认会继续下一部，再开扫描确认可补缺。
+
 # 构建 29：整库原图缓存与播放控制
 
 独立安装包：[Peach-iOS-Test-unsigned.29.ipa](C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.29.ipa)，21,016,427 字节。SHA256 `39e49f86d4e39b7b2397564f9cf82ca29765419df3e5d654dfa4c9ca2890d62a`。无签名 iPhone ARM64、iOS 17.0+，Bundle ID `com.axcz1.peachios.test`。默认命名位置已有不同文件，未覆盖。源码 `9f1c3f2eeedb5b59e9734e5f959e48e1e75e0cb6`；Codemagic `6af0cbeaa1b4111a0a6c3413`，日志和本地校验见 `artifacts/codemagic-29/`。

@@ -1,5 +1,9 @@
 # 当前继续点（2026-11-09）
 
+独立 App **构建 30** 已校验并交付到 `C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.30.ipa`。整库扫描现在显示逐张进度，同一部连续两张取帧失败后先继续下一部，保留已存原图以便补缺。源码 `55b4c2d8a76fc7ed4b3de0aed936ca973782a2fd`，Codemagic `6af16f297cd45783ed247d73`。待 iPhone 复测，见 ACCEPTANCE.md 首节。
+
+## 构建 29 历史
+
 独立 App **构建 29** 已编译、校验并放入 Downloads：`C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.29.ipa`。整库原图缓存、排序记忆、下滑返回、随机连播横屏和高潮点待 iPhone 验收。详见 ACCEPTANCE.md 首节。
 
 - 源码 `9f1c3f2eeedb5b59e9734e5f959e48e1e75e0cb6`，Codemagic `6af0cbeaa1b4111a0a6c3413`。构建 27 保留回退，改动前备份为 `backups/preview-player-20261109-030505/source.zip`（`0c972b1`）。
