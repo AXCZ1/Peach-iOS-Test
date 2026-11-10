@@ -15,8 +15,9 @@ struct MediaBrowserSeekClient: Sendable {
         let config = URLSessionConfiguration.ephemeral
         #if os(iOS)
         config.allowsCellularAccess = false
+        config.networkServiceType = .background
         #endif
-        config.httpMaximumConnectionsPerHost = 2
+        config.httpMaximumConnectionsPerHost = SeekFrameDownloads.parallelism
         config.timeoutIntervalForRequest = 15
         config.timeoutIntervalForResource = 30
         config.urlCache = nil
@@ -90,5 +91,44 @@ struct MediaBrowserSeekClient: Sendable {
             throw PeachAPIError(message: message, status: status)
         }
         return data
+    }
+}
+
+enum SeekFrameDownloads {
+    static let parallelism = 4
+    private static let startSpacing: Duration = .milliseconds(25)
+
+    static func run(_ times: [Int], transfer: @escaping @Sendable (Int) async throws -> Bool,
+                    progress: @Sendable (Int) async -> Void) async throws -> Bool {
+        guard !times.isEmpty else { return true }
+        let clock = ContinuousClock()
+        return try await withThrowingTaskGroup(of: Bool.self) { group in
+            var next = times.startIndex
+            var nextStart = clock.now
+            var completed = 0
+            var unavailable = 0
+            while next < times.endIndex || !group.isEmpty {
+                if next < times.endIndex && next - completed < parallelism {
+                    if clock.now < nextStart { try await clock.sleep(until: nextStart) }
+                    let second = times[next]
+                    guard group.addTaskUnlessCancelled(operation: { try await transfer(second) }) else {
+                        throw CancellationError()
+                    }
+                    next += 1
+                    nextStart = clock.now + startSpacing
+                } else if let saved = try await group.next() {
+                    completed += 1
+                    if !saved { unavailable += 1 }
+                    if completed.isMultiple(of: 24) || completed == times.count {
+                        await progress(completed - unavailable)
+                    }
+                    if unavailable >= 4 {
+                        group.cancelAll()
+                        return false
+                    }
+                }
+            }
+            return unavailable == 0
+        }
     }
 }

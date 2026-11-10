@@ -1,6 +1,7 @@
 import CryptoKit
 import Network
 import SwiftUI
+import UIKit
 
 @MainActor
 final class SeekPreviewSync: ObservableObject {
@@ -9,13 +10,21 @@ final class SeekPreviewSync: ObservableObject {
     @Published private(set) var onWiFi = false
     private let monitor = NWPathMonitor(requiredInterfaceType: .wifi)
     private let cache = SeekPreviewCache.shared
+    private var api: PeachAPI?
+    private var foreground = false
+    private var worker: Task<Void, Never>?
+    private var backgroundTime: UIBackgroundTaskIdentifier = .invalid
 
     init() {
         source = UserDefaults.standard.string(forKey: SeekPreviewSource.preference)
             .flatMap(URL.init(string:)).map(SeekPreviewSource.init)
         monitor.pathUpdateHandler = { [weak self] path in
             let connected = path.status == .satisfied
-            Task { @MainActor in self?.onWiFi = connected }
+            Task { @MainActor in
+                guard let self, onWiFi != connected else { return }
+                onWiFi = connected
+                if connected { startIfPossible() } else { worker?.cancel() }
+            }
         }
         monitor.start(queue: DispatchQueue(label: "peach.seek-previews.wifi"))
     }
@@ -34,7 +43,7 @@ final class SeekPreviewSync: ObservableObject {
         }
         UserDefaults.standard.set(url.absoluteString, forKey: SeekPreviewSource.preference)
         source = SeekPreviewSource(origin: url)
-        configurationRevision += 1
+        restart()
     }
 
     func disconnect() throws {
@@ -42,31 +51,69 @@ final class SeekPreviewSync: ObservableObject {
         UserDefaults.standard.removeObject(forKey: SeekPreviewSource.preference)
         source = nil
         status = nil
-        configurationRevision += 1
+        restart()
     }
 
-    @Published private(set) var configurationRevision = 0
-
-    struct Trigger: Equatable {
-        let active: Bool
-        let peach: URL?
-        let configuration: Int
+    func setAPI(_ api: PeachAPI?) {
+        guard self.api !== api else { return }
+        self.api = api
+        restart()
     }
 
-    func sync(_ api: PeachAPI?) async {
-        guard let source, let api, onWiFi else { return }
+    func setScene(_ phase: ScenePhase) {
+        if phase == .active {
+            foreground = true
+            startIfPossible()
+        } else if phase == .background {
+            foreground = false
+            if backgroundTime == .invalid { worker?.cancel() }
+        }
+    }
+
+    private func restart() {
+        if let worker { worker.cancel() } else { startIfPossible() }
+    }
+
+    private func startIfPossible() {
+        guard foreground, onWiFi, worker == nil, let source, let api else { return }
+        worker = Task {
+            await sync(api, source: source)
+            worker = nil
+            if Task.isCancelled { startIfPossible() }
+        }
+    }
+
+    private func sync(_ api: PeachAPI, source: SeekPreviewSource) async {
         do {
-            while !Task.isCancelled {
+            while foreground && !Task.isCancelled {
                 do {
-                    try await run(api, source: source)
+                    try await runWithBackgroundTime(api, source: source)
                 } catch {
                     try Task.checkCancellation()
                     status = error.localizedDescription
                     if let error = error as? PeachAPIError, error.status == 401 || error.status == 403 { return }
                 }
+                guard foreground else { return }
                 try await Task.sleep(for: .seconds(1800))
             }
-        } catch { }
+        } catch {
+            if !foreground, source == self.source { status = "已保留同步进度 · 回到 Peach 后继续" }
+        }
+    }
+
+    private func runWithBackgroundTime(_ api: PeachAPI, source: SeekPreviewSource) async throws {
+        backgroundTime = UIApplication.shared.beginBackgroundTask(withName: "Sync seek thumbnails") { [weak self] in
+            self?.worker?.cancel()
+            self?.endBackgroundTime()
+        }
+        defer { endBackgroundTime() }
+        try await run(api, source: source)
+    }
+
+    private func endBackgroundTime() {
+        guard backgroundTime != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(backgroundTime)
+        backgroundTime = .invalid
     }
 
     private func run(_ api: PeachAPI, source: SeekPreviewSource) async throws {
@@ -84,7 +131,7 @@ final class SeekPreviewSync: ObservableObject {
         var ready = 0
         for (offset, item) in items.enumerated() {
             try Task.checkCancellation()
-            let progress = "已检查 \(offset + 1) / \(items.count) 部 · \(item.name)"
+            let progress = "已缓存 \(ready) / \(items.count) 部 · 正在检查第 \(offset + 1) 部\n\(item.name)"
             status = progress
             guard let entry = try await client.find(item), let fingerprint = entry.fingerprint else { continue }
             let work: SeekPreviewCache.Work
@@ -93,36 +140,28 @@ final class SeekPreviewSync: ObservableObject {
             } else if let index = try await client.index(for: item, entry: entry, fingerprint: fingerprint) {
                 work = try await cache.prepare(index, origin: origin, source: source, item: item)
             } else { continue }
-            var missing = 0
-            for start in stride(from: 0, to: work.missing.count, by: 2) {
-                if start.isMultiple(of: 24) {
-                    status = progress + "\n本次待补 \(start) / \(work.missing.count) 张"
-                }
-                let batch = work.missing[start..<min(start + 2, work.missing.count)]
-                missing += try await withThrowingTaskGroup(of: Bool.self) { group in
-                    let cache = self.cache
-                    for second in batch {
-                        group.addTask {
-                            do {
-                                let bytes = try await client.frame(second, index: work.index)
-                                try await cache.save(bytes, second: second, work: work)
-                                return true
-                            } catch let error as PeachAPIError where error.status == 404 { return false }
-                        }
-                    }
-                    var unavailable = 0
-                    for try await saved in group where !saved { unavailable += 1 }
-                    return unavailable
-                }
-                // Yield between pairs so bulk fetching leaves room for regular video playback.
-                try await Task.sleep(for: .milliseconds(150))
-                if missing >= 4 { break }
+            let cache = self.cache
+            let total = work.index.times.count
+            let alreadySaved = total - work.missing.count
+            let complete = try await SeekFrameDownloads.run(work.missing) { second in
+                do {
+                    let bytes = try await client.frame(second, index: work.index)
+                    try await cache.save(bytes, second: second, work: work)
+                    return true
+                } catch let error as PeachAPIError where error.status == 404 { return false }
+            } progress: { completed in
+                await self.updateFrameProgress(progress, saved: alreadySaved + completed, total: total)
             }
-            if missing == 0 { ready += 1 }
+            if complete { ready += 1 }
         }
         try await cache.prune(origin: origin, source: source, keeping: Set(items.map(\.id)))
         try Task.checkCancellation()
         status = "已缓存 \(ready) / \(items.count) 部" + (ready == items.count ? "" : " · 未就绪的作品将在下次同步时再检查")
+    }
+
+    private func updateFrameProgress(_ title: String, saved: Int, total: Int) {
+        guard !Task.isCancelled else { return }
+        status = title + "\n已缓存 \(saved) / \(total) 张"
     }
 
     nonisolated private static func sha256(_ value: String) -> String {
@@ -164,7 +203,7 @@ struct SeekPreviewSettings: View {
         } header: {
             Text("进度条缩略图")
         } footer: {
-            Text("App 在前台连接 Wi‑Fi 时提前缓存 Media Browser 已生成的小图。")
+            Text("连接 Wi‑Fi 即可同步，可以离开此页面。系统暂停后，回到 Peach 会继续补齐。")
         }
         .onAppear { address = sync.source?.origin.absoluteString ?? "" }
     }

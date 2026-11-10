@@ -4,6 +4,25 @@ import XCTest
 
 @MainActor
 final class SeekPreviewCacheTests: XCTestCase {
+    func testDownloadQueueOverlapsSlowFramesAndReportsOnlySavedFrames() async throws {
+        let transfers = SeekTransferProbe()
+        let complete = try await SeekFrameDownloads.run(Array(0..<12)) { second in
+            await transfers.start(second)
+            try await Task.sleep(for: second == 0 ? .milliseconds(350) : .milliseconds(65))
+            await transfers.finish(second)
+            return second != 2
+        } progress: { saved in
+            await transfers.progress(saved)
+        }
+        let result = await transfers.result()
+        XCTAssertFalse(complete)
+        XCTAssertEqual(Set(result.started), Set(0..<12))
+        XCTAssertLessThanOrEqual(result.peak, 4)
+        XCTAssertGreaterThan(result.peak, 2)
+        XCTAssertTrue(result.replenishedBeforeSlowFrame)
+        XCTAssertEqual(result.saved, [11])
+    }
+
     func testOnlyMatchingVideoAndExactSourceVersionProduceManifestPath() async throws {
         let json = """
         {"root":"NAS","path":"/hdd2/videos/2/sub/Film.mp4","name":"Film.mp4","type":"video","sizeBytes":12345,
@@ -56,5 +75,27 @@ final class SeekPreviewCacheTests: XCTestCase {
         let newVersion = try await restarted.existing(origin: origin, source: source, item: item, fingerprint: "replacement")
         XCTAssertNil(newVersion)
         XCTAssertFalse(FileManager.default.fileExists(atPath: nearest.path))
+    }
+}
+
+private actor SeekTransferProbe {
+    private var active = Set<Int>()
+    private var started: [Int] = []
+    private var saved: [Int] = []
+    private var peak = 0
+    private var replenishedBeforeSlowFrame = false
+
+    func start(_ second: Int) {
+        if second >= 4 && active.contains(0) { replenishedBeforeSlowFrame = true }
+        started.append(second)
+        active.insert(second)
+        peak = max(peak, active.count)
+    }
+
+    func finish(_ second: Int) { active.remove(second) }
+    func progress(_ count: Int) { saved.append(count) }
+
+    func result() -> (started: [Int], peak: Int, replenishedBeforeSlowFrame: Bool, saved: [Int]) {
+        (started, peak, replenishedBeforeSlowFrame, saved)
     }
 }
