@@ -45,6 +45,51 @@ enum PlaybackTap: Equatable {
     }
 }
 
+struct PlaybackTapSequence {
+    enum Action: Equatable {
+        case wait(until: TimeInterval, showPreviousSingle: Bool)
+        case togglePlayback
+        case seek(offset: Double, startsSequence: Bool)
+    }
+
+    private enum State {
+        case idle
+        case first(PlaybackTap, until: TimeInterval)
+        case seeking(PlaybackTap, until: TimeInterval, offset: Double)
+    }
+
+    private var state = State.idle
+
+    mutating func register(_ zone: PlaybackTap, at timestamp: TimeInterval) -> Action {
+        var showPreviousSingle = false
+        switch state {
+        case .first(let previous, let deadline):
+            if previous == zone, timestamp <= deadline {
+                if zone == .toggle {
+                    state = .idle
+                    return .togglePlayback
+                }
+                let offset = zone == .forward ? 10.0 : -10.0
+                state = .seeking(zone, until: timestamp + 0.7, offset: offset)
+                return .seek(offset: offset, startsSequence: true)
+            }
+            showPreviousSingle = true
+        case .seeking(let previous, let deadline, let offset) where previous == zone && timestamp <= deadline:
+            let next = offset + (zone == .forward ? 10 : -10)
+            state = .seeking(zone, until: deadline, offset: next)
+            return .seek(offset: next, startsSequence: false)
+        default: break
+        }
+        let deadline = timestamp + 0.3
+        state = .first(zone, until: deadline)
+        return .wait(until: deadline, showPreviousSingle: showPreviousSingle)
+    }
+
+    mutating func finishSingle() {
+        state = .idle
+    }
+}
+
 /// Page visibility never overwrites a user's pause choice. Preparing a player
 /// is not a play event; only an allowed, observed playback consumes the mark.
 struct PlaybackIntent {

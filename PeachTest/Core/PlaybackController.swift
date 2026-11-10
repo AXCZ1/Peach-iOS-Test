@@ -21,6 +21,7 @@ final class PlaybackController: ObservableObject {
     @Published private(set) var player: AVPlayer?
     @Published private(set) var localPlayer: (any LocalOriginalPlayer)?
     @Published private(set) var isPlaying = false
+    @Published private(set) var isPausedByUser = false
     @Published private(set) var currentTime = 0.0
     @Published private(set) var duration = 0.0
     @Published private(set) var buffered = 0.0
@@ -55,7 +56,13 @@ final class PlaybackController: ObservableObject {
     private var ticker: Task<Void, Never>?
     private var started = false
     private var stopped = false
-    private var intent = PlaybackIntent()
+    private var intent = PlaybackIntent() {
+        didSet {
+            if oldValue.wantsPlayback != intent.wantsPlayback {
+                isPausedByUser = !intent.wantsPlayback
+            }
+        }
+    }
     private var watchSeconds = 0.0
     private var seeks = 0
     private var lastTick: Date?

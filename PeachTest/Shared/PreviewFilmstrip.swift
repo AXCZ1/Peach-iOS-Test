@@ -83,6 +83,7 @@ struct PreviewFilmstrip: View {
 
     private struct LoadID: Equatable {
         let frames: [FrameRequest]
+        let captureKeys: Set<MediaCacheKey>
         let retry: Int
     }
 
@@ -101,23 +102,29 @@ struct PreviewFilmstrip: View {
     @State private var visibleIndices: Set<Int> = []
     @State private var frames: [MediaCacheKey: FrameState] = [:]
 
-    private var stripRequests: [FrameRequest] {
-        guard scenePhase == .active, !playbackPresented, !expanded else { return [] }
+    private var stripLoad: LoadID {
+        guard scenePhase == .active, !playbackPresented, !expanded else {
+            return LoadID(frames: [], captureKeys: [], retry: frameRetry)
+        }
         let count = times.count
-        guard count > 0 else { return [] }
         let visible = visibleIndices.filter { $0 < count }.sorted()
         let indices: [Int]
-        if let last = visible.last, last > 1 {
+        let behind: [Int]
+        if let first = visible.first, let last = visible.last {
             indices = visible + Array((last + 1)..<min(count, last + 3))
+            behind = Array((max(0, first - 2)..<first).reversed())
         } else {
             // Keep the same first batch when the user scrolls down to the strip.
             indices = Array(0..<min(4, count))
+            behind = []
         }
-        return indices.map { request(at: times[$0]) }
+        let active = indices.map { request(at: times[$0]) }
+        return LoadID(frames: active + behind.map { request(at: times[$0]) },
+                      captureKeys: Set(active.map(\.key)), retry: frameRetry)
     }
 
     var body: some View {
-        let requests = stripRequests
+        let load = stripLoad
         return VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("预览图").font(.subheadline.weight(.semibold)).foregroundStyle(.white.opacity(0.7))
@@ -139,8 +146,8 @@ struct PreviewFilmstrip: View {
                 HStack { Text(error).font(.footnote); Button("重试") { reload += 1 } }.foregroundStyle(.secondary)
             } else { ProgressView().tint(PeachTheme.coral) }
         }
-        .task(id: LoadID(frames: requests, retry: frameRetry)) {
-            await loadOriginals(requests)
+        .task(id: load) {
+            await loadOriginals(load)
         }
         .task(id: "\(item.mediaCacheIdentity):\(reload)") {
             error = nil
@@ -201,8 +208,15 @@ struct PreviewFilmstrip: View {
         .onDisappear { visibleIndices.remove(index) }
     }
 
+    private var galleryRequests: [FrameRequest] {
+        [selected, selected + 1, selected - 1, selected + 2, selected - 2]
+            .filter { times.indices.contains($0) }
+            .map { request(at: times[$0]) }
+    }
+
     private var gallery: some View {
-        let requests = scenePhase == .active ? [request(at: times[selected])] : []
+        let requests = scenePhase == .active ? galleryRequests : []
+        let load = LoadID(frames: requests, captureKeys: Set(requests.prefix(1).map(\.key)), retry: frameRetry)
         return ZStack(alignment: .topTrailing) {
             Color.black.ignoresSafeArea()
             TabView(selection: $selected) {
@@ -228,8 +242,8 @@ struct PreviewFilmstrip: View {
                     expanded = false
                 }
             })
-        .task(id: LoadID(frames: requests, retry: frameRetry)) {
-            await loadOriginals(requests)
+        .task(id: load) {
+            await loadOriginals(load)
         }
     }
 
@@ -267,7 +281,8 @@ struct PreviewFilmstrip: View {
         frameRetry += 1
     }
 
-    private func loadOriginals(_ requests: [FrameRequest]) async {
+    private func loadOriginals(_ load: LoadID) async {
+        let requests = load.frames
         guard !requests.isEmpty, !Task.isCancelled else { return }
         // Retain only the current window; older originals live in the disk cache.
         let keys = Set(requests.map(\.key))
@@ -281,7 +296,8 @@ struct PreviewFilmstrip: View {
             guard !Task.isCancelled else { return }
             if let data, let image = UIImage(data: data) {
                 frames[request.key] = .image(image)
-            } else {
+            } else if load.captureKeys.contains(request.key) {
+                // Neighbor pages only prefetch originals that are already on this device.
                 misses.append(request)
             }
         }

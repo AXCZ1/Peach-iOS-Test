@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import UIKit.UIGestureRecognizerSubclass
 
 /// Transparent gesture layer for immersive playback. A horizontal pan seeks and
 /// must not steal vertical paging; a vertical pan is declined so the enclosing
@@ -18,6 +19,7 @@ struct MediaGestureOverlay: UIViewRepresentable {
     var allowsDownwardDismiss = false
     var onDismissChanged: (CGFloat) -> Void = { _ in }
     var onDismissEnded: (Bool) -> Void = { _ in }
+    var onTimedTap: ((CGFloat, TimeInterval) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -47,16 +49,7 @@ struct MediaGestureOverlay: UIViewRepresentable {
 final class GestureView: UIView, UIGestureRecognizerDelegate {
     weak var coordinator: MediaGestureOverlay.Coordinator?
     private var dismissPan = false
-    private var pan: UIPanGestureRecognizer?
-    private var single: UITapGestureRecognizer?
-    private var double: UITapGestureRecognizer?
-
     func install() {
-        let double = UITapGestureRecognizer(target: self, action: #selector(handleDouble(_:)))
-        double.numberOfTapsRequired = 2
-        let single = UITapGestureRecognizer(target: self, action: #selector(handleSingle(_:)))
-        single.numberOfTapsRequired = 1
-        single.require(toFail: double)
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
         pan.maximumNumberOfTouches = 1
         pan.delegate = self
@@ -64,15 +57,22 @@ final class GestureView: UIView, UIGestureRecognizerDelegate {
         hold.minimumPressDuration = 0.45
         hold.allowableMovement = 12
         hold.delegate = self
-        single.require(toFail: hold)
-        double.require(toFail: hold)
         addGestureRecognizer(hold)
         addGestureRecognizer(pan)
-        addGestureRecognizer(single)
-        addGestureRecognizer(double)
-        self.pan = pan
-        self.single = single
-        self.double = double
+        if coordinator?.parent.onTimedTap != nil {
+            let tap = TimestampedTap(target: self, action: #selector(handleTimedTap(_:)))
+            tap.require(toFail: hold)
+            addGestureRecognizer(tap)
+        } else {
+            let double = UITapGestureRecognizer(target: self, action: #selector(handleDouble(_:)))
+            double.numberOfTapsRequired = 2
+            let single = UITapGestureRecognizer(target: self, action: #selector(handleSingle(_:)))
+            single.require(toFail: double)
+            single.require(toFail: hold)
+            double.require(toFail: hold)
+            addGestureRecognizer(single)
+            addGestureRecognizer(double)
+        }
     }
 
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
@@ -97,6 +97,10 @@ final class GestureView: UIView, UIGestureRecognizerDelegate {
 
     @objc private func handleDouble(_ recognizer: UITapGestureRecognizer) {
         coordinator?.parent.onDoubleTap(recognizer.location(in: self).x / max(bounds.width, 1))
+    }
+
+    @objc private func handleTimedTap(_ recognizer: TimestampedTap) {
+        coordinator?.parent.onTimedTap?(recognizer.location(in: self).x / max(bounds.width, 1), recognizer.timestamp)
     }
 
     @objc private func handlePan(_ recognizer: UIPanGestureRecognizer) {
@@ -124,5 +128,14 @@ final class GestureView: UIView, UIGestureRecognizerDelegate {
         default:
             break
         }
+    }
+}
+
+private final class TimestampedTap: UITapGestureRecognizer {
+    private(set) var timestamp: TimeInterval = 0
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        timestamp = touches.first?.timestamp ?? event.timestamp
+        super.touchesEnded(touches, with: event)
     }
 }

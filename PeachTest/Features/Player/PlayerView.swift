@@ -17,6 +17,11 @@ struct PlayerView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var gestureFeedback: String?
     @State private var feedbackID = UUID()
+    @State private var feedbackIcon: PlaybackTap?
+    @State private var feedbackTask: Task<Void, Never>?
+    @State private var tapSequence = PlaybackTapSequence()
+    @State private var singleTapTask: Task<Void, Never>?
+    @State private var skipAnchor = 0.0
     @State private var controlsVisible = true
     @State private var screenScrubOrigin: Double?
     @State private var dismissOffset: CGFloat = 0
@@ -54,10 +59,13 @@ struct PlayerView: View {
                 Text("2×").font(.headline.monospacedDigit()).foregroundStyle(.white)
                     .padding(12).background(.black.opacity(0.6), in: Capsule()).allowsHitTesting(false)
             }
-            if let gestureFeedback {
+            if preserveOnExit, let gestureFeedback {
                 Text(gestureFeedback).font(.headline).foregroundStyle(.white)
                     .padding(16).background(.black.opacity(0.5), in: Capsule())
                     .allowsHitTesting(false)
+            }
+            if !preserveOnExit, model.phase == .ready {
+                playbackFeedback
             }
             if controlsVisible || screenScrubOrigin != nil {
                 chrome
@@ -79,14 +87,24 @@ struct PlayerView: View {
             session.onPiPStarted = { dismiss() }
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase != .active { screenScrubOrigin = nil; dismissOffset = 0 }
+            if phase != .active {
+                screenScrubOrigin = nil; dismissOffset = 0
+                resetTapSequence()
+                feedbackTask?.cancel()
+                feedbackIcon = nil
+            }
             model.setActive(phase == .active)
         }
         .onDisappear {
+            resetTapSequence()
+            feedbackTask?.cancel()
             orientation.restore()
             session.disappear(keepPlayback: preserveOnExit)
         }
         .onChange(of: session.message) { _, message in if let message { showToast(message) } }
+        .onChange(of: model.isScrubbing) { _, scrubbing in
+            if scrubbing { resetTapSequence() }
+        }
         .onChange(of: model.isPlaying) { _, playing in
             guard playing else { return }
             withAnimation(.easeInOut(duration: 0.2)) { controlsVisible = false }
@@ -96,10 +114,10 @@ struct PlayerView: View {
     private var screenGestures: some View {
         GeometryReader { geometry in
             let timeForDrag: (CGFloat, Double) -> Double = { dx, origin in
-                origin + Double(dx / max(1, geometry.size.width)) * model.duration * 0.5
+                origin + Double(dx / max(1, geometry.size.width)) * model.duration * (preserveOnExit ? 0.5 : 0.05)
             }
             MediaGestureOverlay(
-                onTap: { withAnimation(.easeInOut(duration: 0.18)) { controlsVisible.toggle() } },
+                onTap: toggleControls,
                 onDoubleTap: { fraction in showGesture(model.doubleTap(at: Double(fraction))) },
                 onSeekChanged: { dx in
                     if let origin = screenScrubOrigin { model.previewSeek(timeForDrag(dx, origin)) }
@@ -112,6 +130,7 @@ struct PlayerView: View {
                 allowsHorizontalSeek: session.allowsScreenScrubbing && model.phase == .ready && model.duration > 0,
                 onSeekBegan: {
                     guard !model.isScrubbing else { return }
+                    resetTapSequence()
                     screenScrubOrigin = model.currentTime
                     model.beginScrubbing()
                     model.previewSeek(model.currentTime)
@@ -121,19 +140,90 @@ struct PlayerView: View {
                     screenScrubOrigin = nil
                     model.cancelScrubbing()
                 },
-                onHoldBegan: { model.beginBoost() }, onHoldEnded: { model.endBoost() },
+                onHoldBegan: { resetTapSequence(); model.beginBoost() }, onHoldEnded: { model.endBoost() },
                 allowsDownwardDismiss: !preserveOnExit && !orientation.landscape && verticalSizeClass != .compact,
-                onDismissChanged: { dismissOffset = $0 },
+                onDismissChanged: {
+                    if dismissOffset == 0 { resetTapSequence() }
+                    dismissOffset = $0
+                },
                 onDismissEnded: { close in
                     if close { closePlayer() }
                     else { withAnimation(.snappy) { dismissOffset = 0 } }
-                }
+                },
+                onTimedTap: preserveOnExit ? nil : handleTimedTap
             )
             .accessibilityElement()
             .accessibilityLabel("视频画面")
             .accessibilityAction(named: "播放或暂停") { model.togglePlayback() }
             .accessibilityAction(named: "前进 10 秒") { model.skip(by: 10) }
             .accessibilityAction(named: "后退 10 秒") { model.skip(by: -10) }
+        }
+    }
+
+    private var playbackFeedback: some View {
+        GeometryReader { geometry in
+            let center = geometry.size.width / 2
+            if model.isPausedByUser || feedbackIcon == .toggle {
+                feedbackSymbol(model.isPausedByUser ? "pause.fill" : "play.fill")
+                    .position(x: center, y: geometry.size.height / 2)
+            }
+            if let feedbackIcon, feedbackIcon != .toggle {
+                let forward = feedbackIcon == .forward
+                feedbackSymbol(forward ? "goforward.10" : "gobackward.10")
+                    .position(x: geometry.size.width * (forward ? 0.875 : 0.125), y: geometry.size.height / 2)
+            }
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private func feedbackSymbol(_ name: String) -> some View {
+        Image(systemName: name).font(.system(size: 42, weight: .semibold)).foregroundStyle(.white)
+    }
+
+    private func handleTimedTap(_ fraction: CGFloat, _ timestamp: TimeInterval) {
+        guard !model.isScrubbing else { return }
+        singleTapTask?.cancel()
+        switch tapSequence.register(PlaybackTap.action(at: Double(fraction)), at: timestamp) {
+        case .wait(let deadline, let showPreviousSingle):
+            if showPreviousSingle { toggleControls() }
+            singleTapTask = Task { @MainActor in
+                let delay = max(0, deadline - ProcessInfo.processInfo.systemUptime)
+                try? await Task.sleep(for: .seconds(delay))
+                guard !Task.isCancelled else { return }
+                tapSequence.finishSingle()
+                singleTapTask = nil
+                toggleControls()
+            }
+        case .togglePlayback:
+            model.togglePlayback()
+            showPlaybackIcon(.toggle)
+        case .seek(let offset, let startsSequence):
+            if startsSequence { skipAnchor = model.currentTime }
+            // Seek callbacks may still be reporting the old position during rapid taps.
+            model.seek(to: skipAnchor + offset)
+            showPlaybackIcon(offset > 0 ? .forward : .backward)
+        }
+    }
+
+    private func resetTapSequence() {
+        singleTapTask?.cancel()
+        singleTapTask = nil
+        tapSequence.finishSingle()
+    }
+
+    private func toggleControls() {
+        withAnimation(.easeInOut(duration: 0.18)) { controlsVisible.toggle() }
+    }
+
+    private func showPlaybackIcon(_ icon: PlaybackTap) {
+        feedbackTask?.cancel()
+        feedbackIcon = icon
+        feedbackTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(600))
+            guard !Task.isCancelled else { return }
+            feedbackIcon = nil
         }
     }
 

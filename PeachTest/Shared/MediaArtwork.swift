@@ -229,6 +229,7 @@ struct PlaybackSeekBar: View {
                 Group {
                     if usesLocalSeekThumbnails {
                         LocalSeekThumbnail(origin: api.baseURL, item: item, time: shownTime)
+                            .id("\(api.baseURL.absoluteString)|\(item.mediaCacheIdentity)")
                     } else {
                         SeekThumbnail(api: api, item: item, time: shownTime, duration: controller.duration)
                     }
@@ -257,11 +258,13 @@ private struct LocalSeekThumbnail: View {
     @State private var frames: SeekPreviewCache.Frames?
     @State private var frame: UIImage?
     @State private var loadedURL: URL?
+    @State private var requestedURL: URL?
+    @State private var readTask: Task<Void, Never>?
 
     var body: some View {
         let url = frames?.nearest(to: time)
         return VStack(spacing: 4) {
-            if let url, loadedURL == url, let frame {
+            if let frame {
                 Image(uiImage: frame).resizable().scaledToFit()
                     .frame(width: 160, height: 90)
                     .background(.black)
@@ -275,20 +278,45 @@ private struct LocalSeekThumbnail: View {
         .frame(width: 160)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
-        .task(id: "\(sourceAddress)|\(origin.absoluteString)|\(item.mediaCacheIdentity)") {
+        .task(id: sourceAddress) {
+            resetFrame()
             frames = nil
             guard let address = URL(string: sourceAddress), address.scheme == "https" else { return }
             let snapshot = await SeekPreviewCache.shared.frames(origin: origin, source: SeekPreviewSource(origin: address), item: item)
             guard !Task.isCancelled else { return }
             frames = snapshot
         }
-        .task(id: url) {
-            let bytes = await Task.detached(priority: .userInitiated) {
-                url.flatMap { try? Data(contentsOf: $0, options: .mappedIfSafe) }
-            }.value
-            guard !Task.isCancelled else { return }
-            frame = bytes.flatMap { UIImage(data: $0) }
-            loadedURL = url
+        .onChange(of: url, initial: true) { _, next in requestFrame(next) }
+        .onDisappear { resetFrame() }
+    }
+
+    private func requestFrame(_ url: URL?) {
+        requestedURL = url
+        guard let url, url != loadedURL, readTask == nil else { return }
+        readTask = Task { @MainActor in
+            // Keep one read in flight; intermediate finger positions do not queue more reads.
+            while let target = requestedURL, target != loadedURL, !Task.isCancelled {
+                let image = await Task.detached(priority: .userInitiated) {
+                    (try? Data(contentsOf: target, options: .mappedIfSafe))
+                        .flatMap { UIImage(data: $0) }
+                        .map { $0.preparingForDisplay() ?? $0 }
+                }.value
+                guard !Task.isCancelled else { return }
+                if let image, requestedURL != loadedURL || frame == nil {
+                    frame = image
+                    loadedURL = target
+                }
+                if requestedURL == target { break }
+            }
+            readTask = nil
         }
+    }
+
+    private func resetFrame() {
+        readTask?.cancel()
+        readTask = nil
+        requestedURL = nil
+        loadedURL = nil
+        frame = nil
     }
 }

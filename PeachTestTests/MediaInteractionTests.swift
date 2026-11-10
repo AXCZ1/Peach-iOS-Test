@@ -31,6 +31,29 @@ final class MediaInteractionTests: XCTestCase {
         XCTAssertEqual(PlaybackTap.action(at: 1), .forward)
     }
 
+    func testSideTapsAccumulateFromTheDoubleTapUntilItsFixedDeadline() {
+        var sequence = PlaybackTapSequence()
+        XCTAssertEqual(sequence.register(.forward, at: 10), .wait(until: 10.3, showPreviousSingle: false))
+        XCTAssertEqual(sequence.register(.forward, at: 10.2), .seek(offset: 10, startsSequence: true))
+        XCTAssertEqual(sequence.register(.forward, at: 10.5), .seek(offset: 20, startsSequence: false))
+        XCTAssertEqual(sequence.register(.forward, at: 10.2 + 0.7), .seek(offset: 30, startsSequence: false))
+        let expired = 10.901
+        XCTAssertEqual(sequence.register(.forward, at: expired), .wait(until: expired + 0.3, showPreviousSingle: false))
+        XCTAssertEqual(sequence.register(.forward, at: 11), .seek(offset: 10, startsSequence: true))
+    }
+
+    func testSideChainDoesNotCaptureCenterDoubleTapOrOppositeSide() {
+        var sequence = PlaybackTapSequence()
+        _ = sequence.register(.backward, at: 20)
+        XCTAssertEqual(sequence.register(.backward, at: 20.2), .seek(offset: -10, startsSequence: true))
+        XCTAssertEqual(sequence.register(.backward, at: 20.3), .seek(offset: -20, startsSequence: false))
+        XCTAssertEqual(sequence.register(.toggle, at: 20.4), .wait(until: 20.4 + 0.3, showPreviousSingle: false))
+        XCTAssertEqual(sequence.register(.toggle, at: 20.5), .togglePlayback)
+        XCTAssertEqual(sequence.register(.forward, at: 20.6), .wait(until: 20.6 + 0.3, showPreviousSingle: false))
+        sequence.finishSingle()
+        XCTAssertEqual(sequence.register(.forward, at: 21), .wait(until: 21.3, showPreviousSingle: false))
+    }
+
     func testInactivePlanCannotPlayAndUserPauseSurvivesReturn() {
         var state = PlaybackIntent()
         state.isActive = true
