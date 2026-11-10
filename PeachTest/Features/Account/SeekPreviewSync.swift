@@ -21,9 +21,9 @@ final class SeekPreviewSync: ObservableObject {
         monitor.pathUpdateHandler = { [weak self] path in
             let connected = path.status == .satisfied
             Task { @MainActor in
-                guard let self, onWiFi != connected else { return }
-                onWiFi = connected
-                if connected { startIfPossible() } else { worker?.cancel() }
+                guard let self, self.onWiFi != connected else { return }
+                self.onWiFi = connected
+                if connected { self.startIfPossible() } else { self.worker?.cancel() }
             }
         }
         monitor.start(queue: DispatchQueue(label: "peach.seek-previews.wifi"))
