@@ -76,7 +76,7 @@ struct PlaybackTapSequence {
             showPreviousSingle = true
         case .seeking(let previous, let deadline, let offset) where previous == zone && timestamp <= deadline:
             let next = offset + (zone == .forward ? 10 : -10)
-            state = .seeking(zone, until: deadline, offset: next)
+            state = .seeking(zone, until: timestamp + 0.7, offset: next)
             return .seek(offset: next, startsSequence: false)
         default: break
         }

@@ -33,7 +33,8 @@ struct PlayerView: View {
     @State private var marks: [ClimaxMark] = []
 
     init(item: PeachItem, api: PeachAPI) {
-        self.init(session: PlayerPresentation(api: api, item: item))
+        let controller = PlaybackController(api: api, item: item, usesIndependentVLCClock: true)
+        self.init(session: PlayerPresentation(api: api, item: item, controller: controller))
     }
 
     init(session: PlayerPresentation, preserveOnExit: Bool = false) {

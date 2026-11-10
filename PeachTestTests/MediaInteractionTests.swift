@@ -31,15 +31,16 @@ final class MediaInteractionTests: XCTestCase {
         XCTAssertEqual(PlaybackTap.action(at: 1), .forward)
     }
 
-    func testSideTapsAccumulateFromTheDoubleTapUntilItsFixedDeadline() {
+    func testSideTapsExtendTheDeadlineFromTheLatestSkip() {
         var sequence = PlaybackTapSequence()
         XCTAssertEqual(sequence.register(.forward, at: 10), .wait(until: 10.3, showPreviousSingle: false))
         XCTAssertEqual(sequence.register(.forward, at: 10.2), .seek(offset: 10, startsSequence: true))
-        XCTAssertEqual(sequence.register(.forward, at: 10.5), .seek(offset: 20, startsSequence: false))
-        XCTAssertEqual(sequence.register(.forward, at: 10.2 + 0.7), .seek(offset: 30, startsSequence: false))
-        let expired = 10.901
+        XCTAssertEqual(sequence.register(.forward, at: 10.8), .seek(offset: 20, startsSequence: false))
+        let fourth = 10.8 + 0.7
+        XCTAssertEqual(sequence.register(.forward, at: fourth), .seek(offset: 30, startsSequence: false))
+        let expired = fourth + 0.701
         XCTAssertEqual(sequence.register(.forward, at: expired), .wait(until: expired + 0.3, showPreviousSingle: false))
-        XCTAssertEqual(sequence.register(.forward, at: 11), .seek(offset: 10, startsSequence: true))
+        XCTAssertEqual(sequence.register(.forward, at: expired + 0.1), .seek(offset: 10, startsSequence: true))
     }
 
     func testSideChainDoesNotCaptureCenterDoubleTapOrOppositeSide() {

@@ -72,17 +72,20 @@ final class PlaybackController: ObservableObject {
     private var failedToEndObserver: NSObjectProtocol?
     private var didEnd = false
 
-    init(api: PeachAPI, item: PeachItem, previewOnly: Bool = false,
+    init(api: PeachAPI, item: PeachItem, previewOnly: Bool = false, usesIndependentVLCClock: Bool = false,
          makeLocalPlayer: (@MainActor (URL, LocalOriginalDecoder) -> (any LocalOriginalPlayer)?)? = nil) {
         self.previewOnly = previewOnly
         self.api = api
         self.item = item
-        self.makeLocalPlayer = makeLocalPlayer ?? Self.defaultLocalPlayer
+        self.makeLocalPlayer = makeLocalPlayer ?? { url, decoder in
+            Self.defaultLocalPlayer(url, decoder, usesIndependentClock: usesIndependentVLCClock)
+        }
     }
 
-    private static func defaultLocalPlayer(_ url: URL, _ decoder: LocalOriginalDecoder) -> (any LocalOriginalPlayer)? {
+    private static func defaultLocalPlayer(_ url: URL, _ decoder: LocalOriginalDecoder,
+                                           usesIndependentClock: Bool) -> (any LocalOriginalPlayer)? {
         #if os(iOS) && !SWIFT_PACKAGE
-        VLCOriginalPlayer(url: url, decoder: decoder)
+        VLCOriginalPlayer(url: url, decoder: decoder, usesIndependentClock: usesIndependentClock)
         #else
         nil
         #endif

@@ -32,7 +32,7 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
         VLCLibrary.shared().loggers = [logSink]
     }()
 
-    init(url: URL, decoder: LocalOriginalDecoder) {
+    init(url: URL, decoder: LocalOriginalDecoder, usesIndependentClock: Bool) {
         _ = Self.installLogSink
         view.backgroundColor = .black
         view.clipsToBounds = true
@@ -41,6 +41,8 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
         player.drawable = view
         let media = VLCMedia(url: url)
         if decoder == .software { media?.addOption(":no-hw-dec") }
+        // Don't let already queued audio drive the video clock through a temporary rate change.
+        if usesIndependentClock { media?.addOption(":clock-master=monotonic") }
         player.media = media
         self.player = player
     }
