@@ -1,5 +1,9 @@
 # 当前继续点（2026-11-10）
 
+独立 Peach App **构建 32** 已校验并交付到 `C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.32.ipa`。进度条提前缓存 Media Browser 已生成的 WebP 小图，普通播放与随机连播从手机磁盘读取。NAS 不打缩略图包，详情页阅览图与播放墙未改。源码 `4b624c85dd407e750362cd5c4c2fbfe6b7f1d15a`，Codemagic `6af2b59cb6563a81b57c1899`；真机步骤见 ACCEPTANCE.md 首节。
+
+## 构建 31 历史
+
 独立 Peach App **构建 31** 已校验并交付到 `C:/Users/mo/Downloads/NAS-unsigned .31.ipa`。索引和分类作品列表在返回时复用已加载的数据。源码 `2a662f6738ca0809ec3e31a5cc9056457b3a3aea`，Codemagic `6af1fca97be2a39892c9a83f`。真机待确认滚动位置，见 ACCEPTANCE.md 首节。
 
 ## 构建 30 历史

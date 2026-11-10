@@ -1,3 +1,9 @@
+# 构建 32 · 进度条缩略图提前缓存
+
+独立安装包为 [Peach-iOS-Test-unsigned.32.ipa](C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.32.ipa)，21,098,777 字节，SHA256 `f59871a956cb14ade1817b8e72014f2acc8f8cd7695e071e6d4d217bc761f3e8`。源码 `4b624c85dd407e750362cd5c4c2fbfe6b7f1d15a`，Codemagic `6af2b59cb6563a81b57c1899`。iPhone ARM64 Release 编译和两端 IPA 校验通过；保留 Downloads 中已有的同号 NAS 安装包。校验和编译日志在 `artifacts/codemagic-32/`。
+
+真机待验收。在「我的 → 进度条缩略图」填写 Media Browser 的 HTTPS 地址和密码，在 Wi-Fi 下让 App 同步尚未打开的作品。确认中断后续做、普通播放器和随机连播拖动时直接显示缓存小图，详情页阅览图与播放墙照旧。新片在两个馆藏均可找到、且 NAS 生成小图后，下次同步自动补齐；NAS 不打缩略图包。
+
 # 构建 31 · 索引返回保留滚动位置
 
 独立 Peach 安装包为 [NAS-unsigned .31.ipa](<C:/Users/mo/Downloads/NAS-unsigned .31.ipa>)，21,022,952 字节，SHA256 `390bec1a8d7231f06e04e152e034a829e05a6f15b2022e90fb9ab419d32020c6`。源码 `2a662f6738ca0809ec3e31a5cc9056457b3a3aea`，Codemagic `6af1fca97be2a39892c9a83f`。
