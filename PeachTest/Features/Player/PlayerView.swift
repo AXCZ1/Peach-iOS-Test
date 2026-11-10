@@ -113,51 +113,59 @@ struct PlayerView: View {
 
     private var screenGestures: some View {
         GeometryReader { geometry in
-            let timeForDrag: (CGFloat, Double) -> Double = { dx, origin in
-                origin + Double(dx / max(1, geometry.size.width)) * model.duration * (preserveOnExit ? 0.5 : 0.05)
+            screenGestureLayer(width: geometry.size.width)
+        }
+    }
+
+    private func screenGestureLayer(width: CGFloat) -> some View {
+        let dragScale: Double = preserveOnExit ? 0.5 : 0.05
+        let timeForDrag: (CGFloat, Double) -> Double = { dx, origin in
+            origin + Double(dx / max(1, width)) * model.duration * dragScale
+        }
+        var overlay = MediaGestureOverlay(
+            onTap: { toggleControls() },
+            onDoubleTap: { fraction in showGesture(model.doubleTap(at: Double(fraction))) },
+            onSeekChanged: { dx in
+                if let origin = screenScrubOrigin { model.previewSeek(timeForDrag(dx, origin)) }
+            },
+            onSeekEnded: { dx in
+                guard let origin = screenScrubOrigin else { return }
+                screenScrubOrigin = nil
+                model.endScrubbing(at: timeForDrag(dx, origin))
+            },
+            allowsHorizontalSeek: session.allowsScreenScrubbing && model.phase == .ready && model.duration > 0,
+            onSeekBegan: {
+                guard !model.isScrubbing else { return }
+                resetTapSequence()
+                screenScrubOrigin = model.currentTime
+                model.beginScrubbing()
+                model.previewSeek(model.currentTime)
+            },
+            onSeekCancelled: {
+                guard screenScrubOrigin != nil else { return }
+                screenScrubOrigin = nil
+                model.cancelScrubbing()
+            },
+            onHoldBegan: { resetTapSequence(); model.beginBoost() }, onHoldEnded: { model.endBoost() },
+            allowsDownwardDismiss: !preserveOnExit && !orientation.landscape && verticalSizeClass != .compact,
+            onDismissChanged: { offset in
+                if dismissOffset == 0 { resetTapSequence() }
+                dismissOffset = offset
+            },
+            onDismissEnded: { close in
+                if close { closePlayer() }
+                else { withAnimation(.snappy) { dismissOffset = 0 } }
             }
-            MediaGestureOverlay(
-                onTap: toggleControls,
-                onDoubleTap: { fraction in showGesture(model.doubleTap(at: Double(fraction))) },
-                onSeekChanged: { dx in
-                    if let origin = screenScrubOrigin { model.previewSeek(timeForDrag(dx, origin)) }
-                },
-                onSeekEnded: { dx in
-                    guard let origin = screenScrubOrigin else { return }
-                    screenScrubOrigin = nil
-                    model.endScrubbing(at: timeForDrag(dx, origin))
-                },
-                allowsHorizontalSeek: session.allowsScreenScrubbing && model.phase == .ready && model.duration > 0,
-                onSeekBegan: {
-                    guard !model.isScrubbing else { return }
-                    resetTapSequence()
-                    screenScrubOrigin = model.currentTime
-                    model.beginScrubbing()
-                    model.previewSeek(model.currentTime)
-                },
-                onSeekCancelled: {
-                    guard screenScrubOrigin != nil else { return }
-                    screenScrubOrigin = nil
-                    model.cancelScrubbing()
-                },
-                onHoldBegan: { resetTapSequence(); model.beginBoost() }, onHoldEnded: { model.endBoost() },
-                allowsDownwardDismiss: !preserveOnExit && !orientation.landscape && verticalSizeClass != .compact,
-                onDismissChanged: {
-                    if dismissOffset == 0 { resetTapSequence() }
-                    dismissOffset = $0
-                },
-                onDismissEnded: { close in
-                    if close { closePlayer() }
-                    else { withAnimation(.snappy) { dismissOffset = 0 } }
-                },
-                onTimedTap: preserveOnExit ? nil : handleTimedTap
-            )
+        )
+        if !preserveOnExit {
+            overlay.onTimedTap = { fraction, timestamp in handleTimedTap(fraction, timestamp) }
+        }
+        return overlay
             .accessibilityElement()
             .accessibilityLabel("视频画面")
             .accessibilityAction(named: "播放或暂停") { model.togglePlayback() }
             .accessibilityAction(named: "前进 10 秒") { model.skip(by: 10) }
             .accessibilityAction(named: "后退 10 秒") { model.skip(by: -10) }
-        }
     }
 
     private var playbackFeedback: some View {
