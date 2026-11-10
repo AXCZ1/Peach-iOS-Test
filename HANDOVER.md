@@ -1,5 +1,9 @@
 # 当前继续点（2026-11-10）
 
+独立 Peach App **构建 34** 已校验并交付到 `C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.34.ipa`。进度条小图改为限速滚动并发，同步独立于设置页，iOS 暂停后回到 App 可续做；沿用构建 32 的缓存。源码 `f03f909b6cd2f35593c9c76834f63ebf7bf918db`，Codemagic `6af2da606b25a52a41acd544`；真机待验收，见 ACCEPTANCE.md 首节。
+
+## 构建 32 历史
+
 独立 Peach App **构建 32** 已校验并交付到 `C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.32.ipa`。进度条提前缓存 Media Browser 已生成的 WebP 小图，普通播放与随机连播从手机磁盘读取。NAS 不打缩略图包，详情页阅览图与播放墙未改。源码 `4b624c85dd407e750362cd5c4c2fbfe6b7f1d15a`，Codemagic `6af2b59cb6563a81b57c1899`；真机步骤见 ACCEPTANCE.md 首节。
 
 ## 构建 31 历史

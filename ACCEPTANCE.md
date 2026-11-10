@@ -1,3 +1,11 @@
+# 构建 34 · 缩略图同步提速与离页续做
+
+独立安装包：[Peach-iOS-Test-unsigned.34.ipa](C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.34.ipa)，21,105,034 字节。SHA256 `fefe7beacce55bb15843bf8720e0f9ddfd2648221b087d934b7428ef52c5f534`。源码 `f03f909b6cd2f35593c9c76834f63ebf7bf918db`；Codemagic `6af2da606b25a52a41acd544`。ARM64 Release 编译与云端、本地 IPA 校验通过；日志在 `artifacts/codemagic-34/`。
+
+`MediaBrowserSeekClient.swift` 改为滚动并发，`PeachTestApp.swift` 和 `SeekPreviewSync.swift` 将同步任务交给 App 生命周期管理。25 项相关本地测试通过；`SeekPreviewCacheTests.swift` 覆盖并发上限、慢请求不阻塞补位、失败图片不计入进度及缓存续做。模拟 48 张相同延迟的图片，旧队列 5.52 秒，新队列 1.25 秒；未在 NAS 压测。
+
+真机待验收：用原签名方式覆盖安装构建 32，不卸载。连 Wi-Fi，同步时切到馆藏或播放页面，再回「我的」确认进度继续；切到其他 App 或锁屏后返回，确认保留原有小图并继续补缺。iOS 只允许短暂后台继续。NAS、详情页阅览图和播放墙未改。
+
 # 构建 32 · 进度条缩略图提前缓存
 
 独立安装包为 [Peach-iOS-Test-unsigned.32.ipa](C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.32.ipa)，21,098,777 字节，SHA256 `f59871a956cb14ade1817b8e72014f2acc8f8cd7695e071e6d4d217bc761f3e8`。源码 `4b624c85dd407e750362cd5c4c2fbfe6b7f1d15a`，Codemagic `6af2b59cb6563a81b57c1899`。iPhone ARM64 Release 编译和两端 IPA 校验通过；保留 Downloads 中已有的同号 NAS 安装包。校验和编译日志在 `artifacts/codemagic-32/`。
