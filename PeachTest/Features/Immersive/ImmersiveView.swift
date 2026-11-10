@@ -401,7 +401,7 @@ private struct ImmersivePage: View {
                                 }
                             }.padding(.horizontal, 16)
                             PlaybackSeekBar(controller: controller, api: api, item: item,
-                                            usesOfflineOriginals: true, marks: marks)
+                                            usesLocalSeekThumbnails: true, marks: marks)
                                 .padding(.horizontal, 20).padding(.bottom, 16)
                         }
                     }

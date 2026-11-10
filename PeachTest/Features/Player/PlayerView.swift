@@ -205,13 +205,13 @@ struct PlayerView: View {
                 if verticalSizeClass == .compact, !preserveOnExit {
                     HStack(spacing: 8) {
                         PlaybackSeekBar(controller: model, api: api, item: item, inlineTimes: true,
-                                        usesOfflineOriginals: true, marks: marks)
+                                        usesLocalSeekThumbnails: true, marks: marks)
                         HStack(spacing: 6) { playbackActions }
                     }.padding(.bottom, 2)
                 } else {
                     VStack(spacing: 0) {
                         PlaybackSeekBar(controller: model, api: api, item: item,
-                                        usesOfflineOriginals: !preserveOnExit, marks: preserveOnExit ? [] : marks)
+                                        usesLocalSeekThumbnails: !preserveOnExit, marks: preserveOnExit ? [] : marks)
                         HStack(spacing: 14) {
                             Spacer()
                             playbackActions

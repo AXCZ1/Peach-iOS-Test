@@ -48,6 +48,7 @@ struct AccountHubView: View {
                     .disabled(clearingCache || offlinePreviews.enabled || offlinePreviews.running)
                 if let cacheNotice { Text(cacheNotice).font(.footnote).foregroundStyle(.secondary) }
             }
+            SeekPreviewSettings()
             Section {
                 Button("退出登录", role: .destructive) { session.signOut() }
             }

@@ -140,18 +140,13 @@ struct PlaybackSeekBar: View {
     let api: PeachAPI
     let item: PeachItem
     var inlineTimes = false
-    var usesOfflineOriginals = false
+    var usesLocalSeekThumbnails = false
     var marks: [ClimaxMark] = []
-    @State private var originals: [OfflinePreviewStore.Entry] = []
     @State private var dragging = false
     @State private var value = 0.0
 
     private var shownTime: Double { dragging ? value : (controller.seekPreview ?? controller.currentTime) }
     private var fraction: Double { min(1, max(0, shownTime / max(controller.duration, 1))) }
-
-    private var nearestOriginal: OfflinePreviewStore.Entry? {
-        originals.min { abs($0.time - shownTime) < abs($1.time - shownTime) }
-    }
 
     var body: some View {
         Group {
@@ -171,11 +166,6 @@ struct PlaybackSeekBar: View {
                     }
                 }
             }
-        }
-        .task(id: item.mediaCacheIdentity) {
-            guard usesOfflineOriginals else { return }
-            let available = await OfflinePreviewStore.shared.entries(origin: api.baseURL, item: item)
-            if !Task.isCancelled { originals = available }
         }
         .onChange(of: controller.isScrubbing) { _, scrubbing in
             if !scrubbing { dragging = false }
@@ -237,8 +227,8 @@ struct PlaybackSeekBar: View {
 
             if dragging || controller.seekPreview != nil {
                 Group {
-                    if usesOfflineOriginals {
-                        OfflineSeekThumbnail(entry: nearestOriginal, time: shownTime)
+                    if usesLocalSeekThumbnails {
+                        LocalSeekThumbnail(origin: api.baseURL, item: item, time: shownTime)
                     } else {
                         SeekThumbnail(api: api, item: item, time: shownTime, duration: controller.duration)
                     }
@@ -259,15 +249,19 @@ struct PlaybackSeekBar: View {
     }
 }
 
-private struct OfflineSeekThumbnail: View {
-    let entry: OfflinePreviewStore.Entry?
+private struct LocalSeekThumbnail: View {
+    let origin: URL
+    let item: PeachItem
     let time: Double
+    @AppStorage(SeekPreviewSource.preference) private var sourceAddress = ""
+    @State private var frames: SeekPreviewCache.Frames?
     @State private var frame: UIImage?
     @State private var loadedURL: URL?
 
     var body: some View {
-        VStack(spacing: 4) {
-            if let entry, loadedURL == entry.url, let frame {
+        let url = frames?.nearest(to: time)
+        return VStack(spacing: 4) {
+            if let url, loadedURL == url, let frame {
                 Image(uiImage: frame).resizable().scaledToFit()
                     .frame(width: 160, height: 90)
                     .background(.black)
@@ -281,8 +275,14 @@ private struct OfflineSeekThumbnail: View {
         .frame(width: 160)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
-        .task(id: entry?.url) {
-            let url = entry?.url
+        .task(id: "\(sourceAddress)|\(origin.absoluteString)|\(item.mediaCacheIdentity)") {
+            frames = nil
+            guard let address = URL(string: sourceAddress), address.scheme == "https" else { return }
+            let snapshot = await SeekPreviewCache.shared.frames(origin: origin, source: SeekPreviewSource(origin: address), item: item)
+            guard !Task.isCancelled else { return }
+            frames = snapshot
+        }
+        .task(id: url) {
             let bytes = await Task.detached(priority: .userInitiated) {
                 url.flatMap { try? Data(contentsOf: $0, options: .mappedIfSafe) }
             }.value

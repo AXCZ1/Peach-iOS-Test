@@ -10,7 +10,7 @@ struct PeachAPIError: LocalizedError {
     var errorDescription: String? { message }
 }
 
-private final class PeachOriginRedirects: NSObject, URLSessionTaskDelegate {
+final class PeachOriginRedirects: NSObject, URLSessionTaskDelegate {
     let origin: URL
     init(_ origin: URL) { self.origin = origin }
 
