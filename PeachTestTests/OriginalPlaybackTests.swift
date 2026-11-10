@@ -24,7 +24,24 @@ final class OriginalPlaybackTests: XCTestCase {
         XCTAssertEqual(player.currentTime().seconds, beforeScrubbing, accuracy: 0.2)
         controller.endScrubbing(at: 8)
         try await waitFor("playback after seeking") { player.currentTime().seconds > 8.1 && controller.isPlaying }
+
+        controller.beginScrubbing(pausesPlayback: false)
+        let beforeLiveScrub = player.currentTime().seconds
+        controller.previewSeek(16)
+        try await waitFor("original playback advances while dragging") {
+            player.currentTime().seconds > beforeLiveScrub + 0.25
+        }
+        XCTAssertLessThan(player.currentTime().seconds, 16)
+        XCTAssertEqual(controller.seekPreview, 16)
+        controller.endScrubbing(at: 16)
+        try await waitFor("original jumps only after releasing") { player.currentTime().seconds > 16.1 && controller.isPlaying }
         controller.pause()
+        controller.beginScrubbing(pausesPlayback: false)
+        controller.previewSeek(8)
+        XCTAssertEqual(player.rate, 0)
+        controller.endScrubbing(at: 8)
+        try await waitFor("seek while manually paused") { abs(player.currentTime().seconds - 8) < 0.2 }
+        XCTAssertEqual(player.rate, 0)
         let counts = try await fixture.counts()
         XCTAssertEqual(counts["tickets"], 1)
         XCTAssertGreaterThan(counts["original_ranges", default: 0], 0)
@@ -143,6 +160,17 @@ final class OriginalPlaybackTests: XCTestCase {
         XCTAssertEqual(local.seekTarget, 12)
         local.completeSeek(at: 12.25)
         XCTAssertEqual(controller.currentTime, 12.25)
+        controller.beginScrubbing(pausesPlayback: false)
+        controller.previewSeek(18)
+        local.showFrame(at: 13)
+        XCTAssertTrue(local.playing)
+        XCTAssertEqual(local.seekTarget, 12)
+        XCTAssertEqual(controller.currentTime, 13)
+        XCTAssertEqual(controller.seekPreview, 18)
+        controller.endScrubbing(at: 18)
+        XCTAssertTrue(local.playing)
+        XCTAssertEqual(local.seekTarget, 18)
+        local.completeSeek(at: 18)
         controller.setMuted(false)
         XCTAssertFalse(local.muted)
         controller.setActive(false)

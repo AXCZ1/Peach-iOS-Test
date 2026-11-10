@@ -2,6 +2,11 @@ import AVKit
 import SwiftUI
 
 struct PlayerView: View {
+    private enum PlaybackFeedback: Equatable {
+        case toggle
+        case seek(seconds: Int, forward: Bool)
+    }
+
     let item: PeachItem
     let api: PeachAPI
     let preserveOnExit: Bool
@@ -17,7 +22,7 @@ struct PlayerView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var gestureFeedback: String?
     @State private var feedbackID = UUID()
-    @State private var feedbackIcon: PlaybackTap?
+    @State private var feedback: PlaybackFeedback?
     @State private var feedbackTask: Task<Void, Never>?
     @State private var tapSequence = PlaybackTapSequence()
     @State private var singleTapTask: Task<Void, Never>?
@@ -91,7 +96,7 @@ struct PlayerView: View {
                 screenScrubOrigin = nil; dismissOffset = 0
                 resetTapSequence()
                 feedbackTask?.cancel()
-                feedbackIcon = nil
+                feedback = nil
             }
             model.setActive(phase == .active)
         }
@@ -138,7 +143,7 @@ struct PlayerView: View {
                 guard !model.isScrubbing else { return }
                 resetTapSequence()
                 screenScrubOrigin = model.currentTime
-                model.beginScrubbing()
+                model.beginScrubbing(pausesPlayback: preserveOnExit)
                 model.previewSeek(model.currentTime)
             },
             onSeekCancelled: {
@@ -159,6 +164,7 @@ struct PlayerView: View {
         )
         if !preserveOnExit {
             overlay.onTimedTap = { fraction, timestamp in handleTimedTap(fraction, timestamp) }
+            overlay.holdDuration = 0.25
         }
         return overlay
             .accessibilityElement()
@@ -171,14 +177,18 @@ struct PlayerView: View {
     private var playbackFeedback: some View {
         GeometryReader { geometry in
             let center = geometry.size.width / 2
-            if model.isPausedByUser || feedbackIcon == .toggle {
+            if model.isPausedByUser || feedback == .toggle {
                 feedbackSymbol(model.isPausedByUser ? "pause.fill" : "play.fill")
                     .position(x: center, y: geometry.size.height / 2)
             }
-            if let feedbackIcon, feedbackIcon != .toggle {
-                let forward = feedbackIcon == .forward
-                feedbackSymbol(forward ? "goforward.10" : "gobackward.10")
-                    .position(x: geometry.size.width * (forward ? 0.875 : 0.125), y: geometry.size.height / 2)
+            if case .seek(let seconds, let forward) = feedback {
+                VStack(spacing: 4) {
+                    feedbackSymbol(forward ? "goforward" : "gobackward")
+                    Text(seconds > 0 ? "+\(seconds)" : "\(seconds)")
+                        .font(.system(size: 18, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(.white)
+                }
+                .position(x: geometry.size.width * (forward ? 0.875 : 0.125), y: geometry.size.height / 2)
             }
         }
         .ignoresSafeArea()
@@ -206,12 +216,13 @@ struct PlayerView: View {
             }
         case .togglePlayback:
             model.togglePlayback()
-            showPlaybackIcon(.toggle)
+            showPlaybackFeedback(.toggle)
         case .seek(let offset, let startsSequence):
             if startsSequence { skipAnchor = model.currentTime }
             // Seek callbacks may still be reporting the old position during rapid taps.
             model.seek(to: skipAnchor + offset)
-            showPlaybackIcon(offset > 0 ? .forward : .backward)
+            let seconds = Int((model.currentTime - skipAnchor).rounded())
+            showPlaybackFeedback(.seek(seconds: seconds, forward: offset > 0))
         }
     }
 
@@ -225,13 +236,13 @@ struct PlayerView: View {
         withAnimation(.easeInOut(duration: 0.18)) { controlsVisible.toggle() }
     }
 
-    private func showPlaybackIcon(_ icon: PlaybackTap) {
+    private func showPlaybackFeedback(_ value: PlaybackFeedback) {
         feedbackTask?.cancel()
-        feedbackIcon = icon
+        feedback = value
         feedbackTask = Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(600))
             guard !Task.isCancelled else { return }
-            feedbackIcon = nil
+            feedback = nil
         }
     }
 
@@ -303,13 +314,14 @@ struct PlayerView: View {
                 if verticalSizeClass == .compact, !preserveOnExit {
                     HStack(spacing: 8) {
                         PlaybackSeekBar(controller: model, api: api, item: item, inlineTimes: true,
-                                        usesLocalSeekThumbnails: true, marks: marks)
+                                        usesLocalSeekThumbnails: true, marks: marks, pausesPlaybackWhileDragging: false)
                         HStack(spacing: 6) { playbackActions }
                     }.padding(.bottom, 2)
                 } else {
                     VStack(spacing: 0) {
                         PlaybackSeekBar(controller: model, api: api, item: item,
-                                        usesLocalSeekThumbnails: !preserveOnExit, marks: preserveOnExit ? [] : marks)
+                                        usesLocalSeekThumbnails: !preserveOnExit, marks: preserveOnExit ? [] : marks,
+                                        pausesPlaybackWhileDragging: preserveOnExit)
                         HStack(spacing: 14) {
                             Spacer()
                             playbackActions

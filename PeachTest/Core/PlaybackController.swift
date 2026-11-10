@@ -344,11 +344,11 @@ final class PlaybackController: ObservableObject {
         if intent.mayPlay, !stopped { player?.rate = 1 }
     }
 
-    func beginScrubbing() {
+    func beginScrubbing(pausesPlayback: Bool = true) {
         endBoost()
         isScrubbing = true
-        intent.scrubbing = true
-        pauseInstalledPlayer()
+        intent.scrubbing = pausesPlayback
+        if pausesPlayback { pauseInstalledPlayer() }
     }
 
     /// Horizontal drag preview: show where a release would land without
@@ -362,17 +362,19 @@ final class PlaybackController: ObservableObject {
     }
 
     func endScrubbing(at time: Double) {
+        let pausedForScrub = intent.scrubbing
         isScrubbing = false
         intent.scrubbing = false
         seek(to: time)
-        applyPlaybackIntent()
+        if pausedForScrub { applyPlaybackIntent() }
     }
 
     func cancelScrubbing() {
+        let pausedForScrub = intent.scrubbing
         isScrubbing = false
         intent.scrubbing = false
         seekPreview = nil
-        applyPlaybackIntent()
+        if pausedForScrub { applyPlaybackIntent() }
     }
 
     func setMuted(_ muted: Bool) {
@@ -462,7 +464,7 @@ final class PlaybackController: ObservableObject {
     private func handleLocalEvent(_ event: LocalPlaybackEvent, source: URL, decoder: LocalOriginalDecoder) {
         switch event {
         case let .sample(position, length, playing, hasFrame):
-            if let position, !isScrubbing { currentTime = position }
+            if let position, !intent.scrubbing { currentTime = position }
             if length > 0, length != duration { duration = length }
             if hasFrame, phase == .preparing { phase = .ready }
             if previewOnly { startPreviewHops() }

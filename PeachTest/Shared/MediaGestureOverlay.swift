@@ -20,6 +20,7 @@ struct MediaGestureOverlay: UIViewRepresentable {
     var onDismissChanged: (CGFloat) -> Void = { _ in }
     var onDismissEnded: (Bool) -> Void = { _ in }
     var onTimedTap: ((CGFloat, TimeInterval) -> Void)? = nil
+    var holdDuration: TimeInterval = 0.45
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -54,7 +55,7 @@ final class GestureView: UIView, UIGestureRecognizerDelegate {
         pan.maximumNumberOfTouches = 1
         pan.delegate = self
         let hold = UILongPressGestureRecognizer(target: self, action: #selector(handleHold(_:)))
-        hold.minimumPressDuration = 0.45
+        hold.minimumPressDuration = coordinator?.parent.holdDuration ?? 0.45
         hold.allowableMovement = 12
         hold.delegate = self
         addGestureRecognizer(hold)

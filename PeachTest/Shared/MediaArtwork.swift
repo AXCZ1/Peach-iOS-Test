@@ -142,6 +142,7 @@ struct PlaybackSeekBar: View {
     var inlineTimes = false
     var usesLocalSeekThumbnails = false
     var marks: [ClimaxMark] = []
+    var pausesPlaybackWhileDragging = true
     @State private var dragging = false
     @State private var value = 0.0
 
@@ -199,7 +200,10 @@ struct PlaybackSeekBar: View {
             .gesture(DragGesture(minimumDistance: 0)
                 .onChanged { gesture in
                     guard controller.duration > 0 else { return }
-                    if !dragging { dragging = true; controller.beginScrubbing() }
+                    if !dragging {
+                        dragging = true
+                        controller.beginScrubbing(pausesPlayback: pausesPlaybackWhileDragging)
+                    }
                     value = controller.duration * min(1, max(0, gesture.location.x / max(1, geometry.size.width)))
                 }
                 .onEnded { gesture in
