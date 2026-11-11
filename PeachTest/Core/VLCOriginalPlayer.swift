@@ -32,7 +32,7 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
         VLCLibrary.shared().loggers = [logSink]
     }()
 
-    init(url: URL, decoder: LocalOriginalDecoder) {
+    init(url: URL, decoder: LocalOriginalDecoder, interactivePlayback: Bool = false) {
         _ = Self.installLogSink
         view.backgroundColor = .black
         view.clipsToBounds = true
@@ -41,6 +41,9 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
         player.drawable = view
         let media = VLCMedia(url: url)
         if decoder == .software { media?.addOption(":no-hw-dec") }
+        // Rate changes affect future audio blocks, not blocks already queued for output.
+        // Keep the audio clock and adaptive jitter; shorten the ordinary player's queue.
+        if interactivePlayback { media?.addOption(":network-caching=300") }
         player.media = media
         self.player = player
     }
