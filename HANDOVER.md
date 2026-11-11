@@ -1,12 +1,12 @@
 # Peach iOS Test 当前交接
 
-更新日期：2026-11-11。最新交付为独立 Peach App **构建 41**；已编译、打包、校验并交付，**尚未收到构建 41 的 iPhone 实测结果**。
+更新日期：2026-11-11。最新交付为独立 Peach App **构建 43**；已编译、打包、校验并交付，**尚未收到构建 43 的 iPhone 实测结果**。用户已反馈构建 41：比构建 40 好一些，但仍约一半次数触发问题，且开始 2× 时会跳帧。
 
 ## 当前项目路径和运行方式
 
 - 【PC PowerShell｜项目目录 `C:/Users/mo/Documents/Codex/Peach-iOS-Test`】独立 SwiftUI 项目，仓库 https://github.com/AXCZ1/Peach-iOS-Test，分支 `main`。
-- 构建 41 源码：`881bc41121f30eff664085b5ea1858917071869a`，已推送。Codemagic 构建 ID：`6af44675a2419baf9fe95886`，状态 finished。构建 40 源码仍是 `e998ee3333bb49a91a0bd654e9b782e76b63f728`，Codemagic `6af40be5ee23c91ac258825d`。
-- IPA：`C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.41.ipa`，21,125,242 字节；SHA256 `5ffb709c4ecf0266ba7436f47a92af677606789def46e9633e0c58e20aa8a2ff`。同号 `NAS-unsigned .41.ipa` 已存在且哈希不同，保留未覆盖。构建 40 的 IPA 仍在 `C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.40.ipa`。
+- 构建 43 源码：`272ff0573f9b88bbd2a85147243ae3cacce9bf7d`，已推送。Codemagic 构建 ID：`6af4780aa53ea1f2894b7998`，状态 finished。构建 41 源码仍是 `881bc41121f30eff664085b5ea1858917071869a`，Codemagic `6af44675a2419baf9fe95886`。
+- IPA：`C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.43.ipa`，21,127,815 字节；SHA256 `7e8f96ad7948a107dd3e6af3576f2fb2060315f8e51da02c5d41b79763608d3b`。同号 `NAS-unsigned .43.ipa` 已存在且哈希不同（2,588,652 字节），保留未覆盖。构建 41 的 IPA 仍在 `C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.41.ipa`。
 - Bundle ID `com.axcz1.peachios.test`，显示名 `Peach Test`，iOS 17.0+，iPhone ARM64，无签名；安装仍用用户现有签名方式。
 - `codemagic.yaml` 的 `ios-unsigned-ipa` 调用 `scripts/build-unsigned-ipa.sh`；Pod 安装后使用 `PeachTest.xcworkspace` / `PeachTest` scheme。Codemagic 应用 ID `6aed85f0165a22c4d4b043a0`。API 凭据由进程环境提供，不写入仓库。
 - 后端为用户自管 Peach 0.52.0；App 支持局域网地址和 HTTPS 域名，登录态及密码保存在设备。馆藏数量会变化，不沿用历史 54 部作为当前事实。本轮未重新探测后端。
@@ -21,16 +21,17 @@
 - 普通播放手势：左右各 25% 双击 ±10 秒，中央双击播放/暂停；同侧每次有效快进/退后重新开放 700ms 单击续窗。提示按实际累计位移显示 `+10 / +20 / +30` 或负数，已去掉快进/退图标；播放/暂停白色图标保留，暂停时常驻。
 - 普通画面横滑跨度是全宽对应片长的 0.05；拖动时维持原播放/暂停状态，松手提交 seek。长按识别为 250ms，按下请求 2×、松手恢复 1×。播放墙的既有手势和内嵌播放器不套用普通播放器改动。
 - 构建 40 的定向修改：撤回构建 38 的 `clock-master=monotonic`，恢复 VLC 默认音频主时钟；仅 `PlayerView(item:api:)` 创建的普通播放器通过工厂启用 `interactivePlayback: true`，设置 `network-caching=300`（默认原为 1000ms）。保留自适应 jitter，不在切速时强制 seek、暂停或重建。播放墙、随机连播、卡片预览仍用默认配置。用户随后报告长按 2× 仍有掉帧、延迟和卡死。
-- 构建 41 只改 `PeachTest/Core/VLCOriginalPlayer.swift` 的普通播放器媒体选项：保留 `network-caching=300`，增加 `clock-jitter=0` 和 `no-audio-time-stretch`。Pod 名是 VLCKit 4.0.0a25，但设备二进制版本字符串是 libVLC 3.0.23，其中没有 `clock-master`，所以构建 38 的 monotonic 选项不会被读取。3.0.23 在 PCR 迟到且未超过 `clock-jitter` 时走 `ES_OUT_RESET_PCR` 并重新缓冲。按住 2× 期间音调会升高。播放墙、沉浸页和预览没有这条入口。
+- 构建 41 只改 `PeachTest/Core/VLCOriginalPlayer.swift` 的普通播放器媒体选项：保留 `network-caching=300`，增加 `clock-jitter=0` 和 `no-audio-time-stretch`。Pod 名是 VLCKit 4.0.0a25，但设备二进制版本字符串是 libVLC 3.0.23，其中没有 `clock-master`，所以构建 38 的 monotonic 选项不会被读取。3.0.23 在 PCR 迟到且未超过 `clock-jitter` 时走 `ES_OUT_RESET_PCR` 并重新缓冲。按住 2× 期间音调会升高。播放墙、沉浸页和预览没有这条入口。用户随后反馈好了一些，但仍约一半次数触发，且开始 2× 会跳帧。
+- 构建 43 仍只改这个文件的普通播放器。保留 `clock-jitter=0` 和 `no-audio-time-stretch`。`network-caching` 从 300 改为 150。3.0.23 的显示时间偏移是缓存乘以 (1/速度 − 1)；300ms 下 1×→2× 一次跳 −150ms，超过 2× 音频冲刷阈值（约 90ms），并让视频输出裁掉日期不早于新帧的队列，这就是开始倍速时的跳帧。150ms 把整段偏移压到 75ms。已经在播放时，倒数速率按 0.1 逐级变化（一级约 15ms，级间 50ms，1× 到 2× 约 200ms）。libVLC 会把连续的变速控制收成最后一次，所以不能在一帧之内设到底。暂停、停止和第一次播放仍立即设速，不 seek、不重建。播放墙、沉浸页和预览不走这条入口。
 - 涉及文件：`PeachTest/Core/VLCOriginalPlayer.swift`。700ms 规则仍在 `PeachTest/Core/MediaPresentation.swift`，本轮未改。
-- 验证：构建 41 工作流里 Debug 与 Release 各 65 项测试、4 项跳过、0 失败；iPhone ARM64 Release `BUILD SUCCEEDED`。本地核对 ZIP、Info.plist、ARM64、无签名和 SHA256。证据在 `artifacts/codemagic-41/`。未启动模拟器，未实测真机倍速。
+- 验证：构建 43 工作流里 Debug 与 Release 各 65 项测试、4 项跳过、0 失败；iPhone ARM64 Release `BUILD SUCCEEDED`。本地核对 ZIP、Info.plist、ARM64、无签名和 SHA256。证据在 `artifacts/codemagic-43/`。未启动模拟器，未实测真机倍速。
 - `ACCEPTANCE.md` 首节目前仍为构建 34，不能当作构建 40 的验收回执；本文件记录当前继续点，旧构建详情继续查原记录及 Git 历史。
 
 ## 当前稳定备份
 
 - **没有已确认消除倍速问题的稳定版本。** 构建 37 的 IPA 仍在 Downloads，源码 `d544e7a1b160a8523a2e63bfa4ef393ff1b7fb29`；用户已报告 VLC 实际切速和松手恢复各延迟约 1–2 秒，只能作为回归前比较点，不能称为无缺陷稳定版。
 - 构建 38（`207c3385dcc8d44da0dace2a02037a14d0960693`）强改时钟后，用户报告卡死、无声、声音卡住和掉帧；**不要恢复该时钟方案，也不要推荐构建 38 回退**。
-- 构建 39（`37eff0c87bbeee3bd3421dc0c9bc4f1b4fe3d12b`，Codemagic `6af409e2785c68ee929f4ccb`）只撤回时钟并删快进图标，云端成功但未作为最终修复交付；用户明确不接受仅回退旧状态作为解决方案。当前继续点是构建 41，构建 40 的真机问题尚未被新包证实消除。
+- 构建 39（`37eff0c87bbeee3bd3421dc0c9bc4f1b4fe3d12b`，Codemagic `6af409e2785c68ee929f4ccb`）只撤回时钟并删快进图标，云端成功但未作为最终修复交付；用户明确不接受仅回退旧状态作为解决方案。当前继续点是构建 43。构建 41 只被用户评为好了一些，约一半次数仍会触发，开始 2× 仍跳帧。构建 40 的真机问题尚未被新包证实消除。
 - 既有源码备份保留：`backups/preview-player-20261109-030505/source.zip`（`0c972b1`）、`backups/local-preview-decode-20261108-041442/source.bundle`（`02bd7ee`）、`backups/vlc-pip-20261108-001740/source.bundle`（`d163e33`）及其他历史备份。它们只覆盖源码，不代表后端或媒体备份；本轮不新增或清理备份。
 - NAS 构建 82 和原工程未在本轮修改或重新打包；历史校验见 `ACCEPTANCE.md`。本轮未重复验证其文件哈希。
 
@@ -44,8 +45,8 @@
 
 ## 未解决问题
 
-- **首要问题：VLC 长按 2×及松手后的真实音画响应。** 用户在构建 40 上仍报告掉帧、延迟和卡死。2× 提示及时，延迟的是画面速度；解码显示「原文件直放 · VLC」或「VLC 软件解码」。不要再次把问题当作长按识别延迟，也不要重复询问这两个已确认事实。构建 41 尚未收到真机结果。
-- 构建 41 的判断依据是设备二进制里的 libVLC 3.0.23 字符串，以及与之对应的 3.0.23 `es_out.c`：迟到 PCR 在默认 jitter 内会重新缓冲。这不是手机测量。`clock-jitter=0` 会改变普通播放器在 1× 迟到时的处理，从重新缓冲改为重置时钟；只在 PCR 迟到时出现。
+- **首要问题：VLC 长按 2×及松手后的真实音画响应。** 用户在构建 41 上反馈：好了一些，但仍约 50% 触发，且开始倍速时会跳帧。2× 提示及时，延迟的是画面速度；解码显示「原文件直放 · VLC」或「VLC 软件解码」。不要再次把问题当作长按识别延迟，也不要重复询问这两个已确认事实。构建 43 尚未收到真机结果。
+- 构建 41 的判断依据是设备二进制里的 libVLC 3.0.23 字符串，以及与之对应的 3.0.23 `es_out.c` 和 `clock.c`：迟到 PCR 在默认 jitter 内会重新缓冲；`ClockGetTsOffset` 使 2× 的显示时间相对 1× 提前半个缓存。这不是手机测量。`clock-jitter=0` 会改变普通播放器在 1× 迟到时的处理，从重新缓冲改为重置时钟；只在 PCR 迟到时出现。构建 43 没有取消这个行为。
 - `artifacts/upstream/vlc-rate/` 来自较新的 VLC master，含 `clock-master`，**不等于**内嵌 3.0.23。不要再按那套主时钟源码改这个包。
 - 历史 SONE-081 在构建 27 仍黑屏，用户没有给出后续解决回执；构建 40 未修这个单片问题。
 - 快拖进度条黑图、详情原图预缓存后偶发转圈、拖进度画面静止均已有定向改动，但本会话没有收到完整真机通过回执；不要将旧未确认问题一并宣称解决。
@@ -53,7 +54,7 @@
 
 ## 下一步任务
 
-1. 用构建 41 在同一部原先出问题的作品上短按住、持续按住、反复按住和松手。看音画进入 2× 和回到 1× 的时间，以及掉帧、卡死和无声。不要把 2× 提示当成速度证据。按住期间音调升高是 `no-audio-time-stretch` 的预期结果。
-2. 若仍失败，记录是按下后、按住过程中，还是松手后出现，以及大约多久。不要再给这个 3.0.23 二进制加 `clock-master`。
+1. 用构建 43 在同一部原先出问题的作品上短按住、持续按住、反复按住和松手。看开始 2× 是否还跳帧，以及那大约一半的卡顿还在不在。进入 2× 会逐级加速约 0.2 秒，按住期间音调升高是预期。不要把 2× 提示当成速度证据。
+2. 若仍失败，记录是按下瞬间、按住过程中，还是松手后出现，以及大约多久。不要再给这个 3.0.23 二进制加 `clock-master`，也不要把缓存改回 300 当成修复。
 3. 一并看快进累计秒数和 700ms 续点，以及普通拖动、暂停、退出和 PiP。播放墙内嵌播放器不应改变。
 4. 只在有新的真机证据后再改代码和构建。
