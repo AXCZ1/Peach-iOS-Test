@@ -35,6 +35,11 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
     private var pulse: Task<Void, Never>?
     private var pendingSeek: Seek?
     private let confirmsSeekFrames: Bool
+    private var playCallMilliseconds: Int?
+    private var seekCallMilliseconds: Int?
+    private var picturesAtSeek: UInt64?
+    private var picturesBeforeVisibleLayer: UInt64 = 0
+    private var lastDisplayFailureCode: Int?
 
     private struct Seek {
         let target: Int32
@@ -94,7 +99,9 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
             }
             if !hasFrame { firstFrameDeadline = ContinuousClock.now + .seconds(15) }
             applyMute(to: player)
+            let started = ContinuousClock.now
             player.play()
+            if confirmsSeekFrames { playCallMilliseconds = elapsedMilliseconds(since: started) }
         } else if !shouldPlay, playbackRequested {
             playbackRequested = false
             firstFrameDeadline = nil
@@ -153,10 +160,12 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
 
     private func poll() {
         guard let player else { return }
+        resumeFailedDisplayIfNeeded()
         let state = player.state
         let checkingSeek = confirmsSeekFrames && pendingSeek != nil
         let statistics = (!hasFrame || checkingSeek) && state != .stopped ? player.media?.statistics : nil
-        let displayedFrame = (statistics?.displayedPictures ?? 0) > 0
+        let displayedCount = statistics?.displayedPictures ?? 0
+        let displayedFrame = displayedCount > 0
         let canRetryInSoftware = !hasFrame && !displayedFrame && (statistics?.demuxReadBytes ?? 0) > 0
         if state == .error {
             fail("iPhone 无法打开原文件。请检查 Peach 连接和文件格式。", canRetryInSoftware: canRetryInSoftware)
@@ -167,7 +176,21 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
             position = Double(milliseconds) / 1_000
         }
         let total = duration(of: player)
-        if displayedFrame {
+        if confirmsSeekFrames && !hasFrame {
+            // A failed sample-buffer layer drops pictures while VLC still counts
+            // them. A missing layer keeps the previous displayed-picture rule.
+            if let layer = pictureInPictureLayer {
+                if layer.status == .failed {
+                    picturesBeforeVisibleLayer = max(picturesBeforeVisibleLayer, displayedCount)
+                } else if displayedCount > picturesBeforeVisibleLayer {
+                    hasFrame = true
+                    firstFrameDeadline = nil
+                }
+            } else if displayedFrame {
+                hasFrame = true
+                firstFrameDeadline = nil
+            }
+        } else if displayedFrame {
             hasFrame = true
             firstFrameDeadline = nil
         }
@@ -211,11 +234,18 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
             let beforeJump = confirmsSeekFrames && playbackRequested ? (displayedPictures ?? 0) : nil
             seek.confirmation = VLCSeekConfirmation(target: seek.target, displayedBeforeJump: beforeJump)
             pendingSeek = seek
+            // The sample-buffer display keeps the last image across a time jump
+            // and then drops every later picture once its status is failed.
+            if confirmsSeekFrames { prepareDisplayForTimeJump() }
+            picturesAtSeek = displayedPictures
+            let started = ContinuousClock.now
             player.time = VLCTime(int: seek.target)
+            if confirmsSeekFrames { seekCallMilliseconds = elapsedMilliseconds(since: started) }
             return
         }
         // A native clock jump can precede the next video frame.
-        if seek.confirmation?.observe(position: position, displayedPictures: displayedPictures, playing: playbackRequested) == true {
+        let displayFailed = confirmsSeekFrames && pictureInPictureLayer?.status == .failed
+        if !displayFailed && seek.confirmation?.observe(position: position, displayedPictures: displayedPictures, playing: playbackRequested) == true {
             pendingSeek = nil
             seek.completion(position)
         } else if ContinuousClock.now >= deadline {
@@ -236,6 +266,69 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
         seek?.completion(nil)
     }
 
+    /// VLC 4 timestamps samples against the host clock and does not flush the
+    /// sample-buffer layer on seek. Once that layer fails for any reason other
+    /// than revoked decoder resources, its display callback drops every later
+    /// picture and the previous image stays. The host clock itself is left
+    /// alone: picture-in-picture timing is calculated from it.
+    private func prepareDisplayForTimeJump() {
+        flushDisplayLayer(onlyWhenFailed: false)
+    }
+
+    private func resumeFailedDisplayIfNeeded() {
+        flushDisplayLayer(onlyWhenFailed: true)
+    }
+
+    private func flushDisplayLayer(onlyWhenFailed: Bool) {
+        guard confirmsSeekFrames, let layer = pictureInPictureLayer else { return }
+        if layer.status == .failed {
+            lastDisplayFailureCode = (layer.error as NSError?)?.code ?? lastDisplayFailureCode
+        } else if onlyWhenFailed {
+            return
+        }
+        layer.flush()
+    }
+
+    private func elapsedMilliseconds(since start: ContinuousClock.Instant) -> Int {
+        let parts = start.duration(to: .now).components
+        return Int(parts.seconds) * 1_000 + Int(parts.attoseconds / 1_000_000_000_000_000)
+    }
+
+    private func playbackFacts() -> String {
+        let stateName: String
+        switch player?.state {
+        case .opening: stateName = "opening"
+        case .playing: stateName = "playing"
+        case .paused: stateName = "paused"
+        case .stopping: stateName = "stopping"
+        case .stopped: stateName = "stopped"
+        case .error: stateName = "error"
+        default: stateName = "none"
+        }
+        let stats = player?.media?.statistics
+        let shown = stats?.displayedPictures ?? 0
+        let shownText = picturesAtSeek.map { "显示 \($0)→\(shown)" } ?? "显示 \(shown)"
+        let playCall = playCallMilliseconds.map { "播放调用 \($0)ms" } ?? "播放调用未计时"
+        let seekCall = seekCallMilliseconds.map { "跳转调用 \($0)ms" } ?? "未调用跳转"
+        let target = pendingSeek.map { String(format: "目标 %.1f", Double($0.target) / 1_000) } ?? "无跳转"
+        let layerText: String
+        if let layer = pictureInPictureLayer {
+            switch layer.status {
+            case .unknown: layerText = "画面层 unknown"
+            case .rendering: layerText = "画面层 rendering"
+            case .failed: layerText = "画面层 failed \((layer.error as NSError?)?.code ?? 0)"
+            @unknown default: layerText = "画面层 other"
+            }
+            if layer.status != .failed, let lastDisplayFailureCode {
+                layerText += "，曾失败 \(lastDisplayFailureCode)"
+            }
+        } else {
+            layerText = "画面层未创建"
+            if let lastDisplayFailureCode { layerText += "，曾失败 \(lastDisplayFailureCode)" }
+        }
+        return "时间 \(String(format: "%.1f", position))s，状态 \(stateName)，\(target)，\(playCall)，\(seekCall)。读取 \(stats?.demuxReadBytes ?? 0)，解码 \(stats?.decodedVideo ?? 0)，\(shownText)，丢失 \(stats?.lostPictures ?? 0)。\(layerText)"
+    }
+
     private func applyMute(to player: VLCMediaPlayer) {
         let mute = muted || pendingSeek != nil
         if let audio = player.audio, audio.isMuted != mute { audio.isMuted = mute }
@@ -247,9 +340,10 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
     }
 
     private func fail(_ message: String, canRetryInSoftware: Bool) {
+        let reported = confirmsSeekFrames ? message + "\n" + playbackFacts() : message
         if confirmsSeekFrames, pendingSeek != nil { hasFrame = false }
         stop()
-        onEvent?(.failed(message, canRetryInSoftware: canRetryInSoftware))
+        onEvent?(.failed(reported, canRetryInSoftware: canRetryInSoftware))
     }
 }
 
