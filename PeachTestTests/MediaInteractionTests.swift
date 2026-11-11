@@ -82,6 +82,20 @@ final class MediaInteractionTests: XCTestCase {
         XCTAssertFalse(state.mayPlay)
     }
 
+    func testVLCSeekWaitsForNewVideoAfterTheClockJumps() {
+        var seek = VLCSeekConfirmation(target: 12_000, displayedBeforeJump: 30)
+        XCTAssertFalse(seek.observe(position: 2, displayedPictures: 32, playing: true))
+        XCTAssertFalse(seek.observe(position: 12, displayedPictures: 32, playing: true))
+        XCTAssertTrue(seek.observe(position: 12.2, displayedPictures: 33, playing: true))
+    }
+
+    func testVLCPausedSeekAndOtherModesStillUseTheClock() {
+        var paused = VLCSeekConfirmation(target: 12_000, displayedBeforeJump: 30)
+        XCTAssertTrue(paused.observe(position: 12, displayedPictures: 30, playing: false))
+        var legacy = VLCSeekConfirmation(target: 12_000, displayedBeforeJump: nil)
+        XCTAssertTrue(legacy.observe(position: 12, displayedPictures: nil, playing: true))
+    }
+
     func testCountOnlyOnFirstRealActivePlayback() {
         var state = PlaybackIntent()
         state.isActive = true

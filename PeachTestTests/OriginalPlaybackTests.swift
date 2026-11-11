@@ -212,6 +212,31 @@ final class OriginalPlaybackTests: XCTestCase {
         XCTAssertTrue(local.playing)
     }
 
+    func testRetryFromBeginningBypassesSavedResumeAfterVLCFailure() async throws {
+        let fixture = try OriginalPlaybackFixture()
+        defer { fixture.stop() }
+        let initial = RecordingLocalPlayer()
+        let retry = RecordingLocalPlayer()
+        var opened = 0
+        let controller = try fixture.controller(id: 42006, makeLocalPlayer: { _, _ in
+            opened += 1
+            return opened == 1 ? initial : retry
+        })
+        defer { controller.stop(); PlayerMemory.shared.clear(42006) }
+        PlayerMemory.shared.save(8, for: 42006)
+        await controller.activate()
+        XCTAssertEqual(initial.seekTarget, 8)
+        initial.onEvent?(.failed("未能跳转到指定位置。"))
+        XCTAssertEqual(controller.phase, .failed("未能跳转到指定位置。"))
+
+        await controller.retryFromBeginning()
+        XCTAssertTrue(controller.localPlayer === retry)
+        XCTAssertNil(retry.seekTarget)
+        XCTAssertTrue(retry.playing)
+        XCTAssertEqual(controller.currentTime, 0)
+        XCTAssertEqual(PlayerMemory.shared.position(for: 42006), 8)
+    }
+
     func testMKVUsesSignedOriginalWithoutAVProbeOrStreamPlan() async throws {
         let fixture = try OriginalPlaybackFixture()
         defer { fixture.stop() }

@@ -33,7 +33,9 @@ struct PlayerView: View {
     @State private var marks: [ClimaxMark] = []
 
     init(item: PeachItem, api: PeachAPI) {
-        let controller = PlaybackController(api: api, item: item, usesDirectAVRateControl: true)
+        let controller = PlaybackController(api: api, item: item, usesDirectAVRateControl: true, makeLocalPlayer: { url, decoder in
+            VLCOriginalPlayer(url: url, decoder: decoder, confirmsSeekFrames: true)
+        })
         self.init(session: PlayerPresentation(api: api, item: item, controller: controller))
     }
 
@@ -267,9 +269,17 @@ struct PlayerView: View {
                 .foregroundStyle(.white.opacity(0.6))
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 34)
-            Button("关闭") { dismiss() }
-                .buttonStyle(.borderedProminent)
-                .tint(PeachTheme.coral)
+            if !preserveOnExit {
+                Button("从头重试") { Task { await model.retryFromBeginning() } }
+                    .buttonStyle(.borderedProminent)
+                    .tint(PeachTheme.coral)
+                Button("关闭", action: closePlayer)
+                    .foregroundStyle(.white)
+            } else {
+                Button("关闭") { dismiss() }
+                    .buttonStyle(.borderedProminent)
+                    .tint(PeachTheme.coral)
+            }
         }
     }
 

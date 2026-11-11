@@ -1,3 +1,19 @@
+struct VLCSeekConfirmation {
+    let target: Int32
+    var displayedBeforeJump: UInt64?
+
+    mutating func observe(position: Double, displayedPictures: UInt64?, playing: Bool) -> Bool {
+        guard abs(position - Double(target) / 1_000) < 1 else {
+            if let previous = displayedBeforeJump, let displayedPictures {
+                displayedBeforeJump = max(previous, displayedPictures)
+            }
+            return false
+        }
+        guard playing, let displayedBeforeJump else { return true }
+        return (displayedPictures ?? 0) > displayedBeforeJump
+    }
+}
+
 #if os(iOS) && !SWIFT_PACKAGE
 import AVFoundation
 import UIKit
@@ -18,11 +34,12 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
     private var firstFrameDeadline: ContinuousClock.Instant?
     private var pulse: Task<Void, Never>?
     private var pendingSeek: Seek?
+    private let confirmsSeekFrames: Bool
 
     private struct Seek {
         let target: Int32
         let completion: (Double?) -> Void
-        var issued = false
+        var confirmation: VLCSeekConfirmation?
         var deadline: ContinuousClock.Instant?
     }
 
@@ -32,7 +49,8 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
         VLCLibrary.shared().loggers = [logSink]
     }()
 
-    init(url: URL, decoder: LocalOriginalDecoder) {
+    init(url: URL, decoder: LocalOriginalDecoder, confirmsSeekFrames: Bool = false) {
+        self.confirmsSeekFrames = confirmsSeekFrames
         _ = Self.installLogSink
         view.backgroundColor = .black
         view.clipsToBounds = true
@@ -136,9 +154,10 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
     private func poll() {
         guard let player else { return }
         let state = player.state
-        let statistics = !hasFrame && state != .stopped ? player.media?.statistics : nil
+        let checkingSeek = confirmsSeekFrames && pendingSeek != nil
+        let statistics = (!hasFrame || checkingSeek) && state != .stopped ? player.media?.statistics : nil
         let displayedFrame = (statistics?.displayedPictures ?? 0) > 0
-        let canRetryInSoftware = !displayedFrame && (statistics?.demuxReadBytes ?? 0) > 0
+        let canRetryInSoftware = !hasFrame && !displayedFrame && (statistics?.demuxReadBytes ?? 0) > 0
         if state == .error {
             fail("iPhone 无法打开原文件。请检查 Peach 连接和文件格式。", canRetryInSoftware: canRetryInSoftware)
             return
@@ -153,7 +172,15 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
             firstFrameDeadline = nil
         }
         if let deadline = firstFrameDeadline, ContinuousClock.now >= deadline {
-            fail("原文件没有输出画面。", canRetryInSoftware: canRetryInSoftware)
+            let message: String
+            if confirmsSeekFrames, let statistics, statistics.demuxReadBytes > 0 {
+                message = statistics.decodedVideo > 0
+                    ? "VLC 已解码视频，但没有显示画面。"
+                    : "已读取原文件，但 VLC 没有解出视频帧。"
+            } else {
+                message = "原文件没有输出画面。"
+            }
+            fail(message, canRetryInSoftware: canRetryInSoftware)
             return
         }
         // VLC 4 reports .stopped at EOF. It also starts in .stopped before opening.
@@ -167,7 +194,8 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
             updatePulse()
             return
         }
-        updateSeek(on: player)
+        updateSeek(on: player, displayedPictures: statistics?.displayedPictures, canRetryInSoftware: canRetryInSoftware)
+        guard self.player != nil else { return }
         applyMute(to: player)
         onEvent?(.sample(position: reportingPosition, duration: total,
                         playing: playbackRequested && player.isPlaying && reportingPosition != nil,
@@ -175,20 +203,28 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
         updatePulse()
     }
 
-    private func updateSeek(on player: VLCMediaPlayer) {
+    private func updateSeek(on player: VLCMediaPlayer, displayedPictures: UInt64?, canRetryInSoftware: Bool) {
         guard var seek = pendingSeek else { return }
         let deadline = seek.deadline ?? (ContinuousClock.now + .seconds(8))
         seek.deadline = deadline
-        if !seek.issued, player.isSeekable {
-            seek.issued = true
+        if seek.confirmation == nil, player.isSeekable {
+            let beforeJump = confirmsSeekFrames && playbackRequested ? (displayedPictures ?? 0) : nil
+            seek.confirmation = VLCSeekConfirmation(target: seek.target, displayedBeforeJump: beforeJump)
             pendingSeek = seek
             player.time = VLCTime(int: seek.target)
             return
         }
-        let reached = seek.issued && abs(position - Double(seek.target) / 1_000) < 1
-        if reached || ContinuousClock.now >= deadline {
+        // A native clock jump can precede the next video frame.
+        if seek.confirmation?.observe(position: position, displayedPictures: displayedPictures, playing: playbackRequested) == true {
             pendingSeek = nil
-            seek.completion(reached ? position : nil)
+            seek.completion(position)
+        } else if ContinuousClock.now >= deadline {
+            if confirmsSeekFrames && playbackRequested {
+                fail("未能跳转到指定位置。", canRetryInSoftware: canRetryInSoftware)
+            } else {
+                pendingSeek = nil
+                seek.completion(nil)
+            }
         } else {
             pendingSeek = seek
         }
@@ -211,6 +247,7 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
     }
 
     private func fail(_ message: String, canRetryInSoftware: Bool) {
+        if confirmsSeekFrames, pendingSeek != nil { hasFrame = false }
         stop()
         onEvent?(.failed(message, canRetryInSoftware: canRetryInSoftware))
     }

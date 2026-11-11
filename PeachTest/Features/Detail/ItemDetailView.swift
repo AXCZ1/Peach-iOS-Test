@@ -40,9 +40,7 @@ struct ItemDetailView: View {
         .toolbarColorScheme(.dark, for: .navigationBar)
         .task { await model.load() }
         .fullScreenCover(isPresented: $playerPresented) {
-            if let current = model.item {
-                PlayerView(item: current, api: api)
-            }
+            PlayerView(item: current, api: api)
         }
     }
 

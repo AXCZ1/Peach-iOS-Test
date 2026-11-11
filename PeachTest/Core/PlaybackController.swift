@@ -90,7 +90,7 @@ final class PlaybackController: ObservableObject {
         #endif
     }
 
-    private func start() async {
+    private func start(fromBeginning: Bool = false) async {
         guard intent.isActive else { return }
         if stopped {
             // A page recycled by the immersive pager can be scrolled back into
@@ -108,10 +108,21 @@ final class PlaybackController: ObservableObject {
         guard !started else { return }
         started = true
         phase = .preparing
-        if !previewOnly {
+        if !previewOnly, !fromBeginning {
             pendingResume = PlayerMemory.shared.position(for: item.id) ?? item.resumeTime
+        } else {
+            pendingResume = nil
         }
         await prepareStream(for: sessionID)
+    }
+
+    func retryFromBeginning() async {
+        guard case .failed = phase, foregroundActive else { return }
+        stop()
+        currentTime = 0
+        intent.wantsPlayback = true
+        setActive(true)
+        await start(fromBeginning: true)
     }
 
     private func canInstallStream(for requestedSession: String) -> Bool {
