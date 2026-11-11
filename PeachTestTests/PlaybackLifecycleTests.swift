@@ -83,19 +83,23 @@ final class PlaybackLifecycleTests: XCTestCase {
     func testBoostReturnsToNormalOnReleaseAndLeavingPage() async throws {
         let fixture = try OriginalPlaybackFixture()
         defer { fixture.stop() }
-        let controller = try fixture.controller()
-        await controller.activate()
-        let player = try XCTUnwrap(controller.player, "\(controller.phase)")
-        controller.beginBoost()
-        XCTAssertTrue(controller.isBoosting)
-        XCTAssertEqual(player.defaultRate, 2)
-        controller.endBoost()
-        XCTAssertFalse(controller.isBoosting)
-        XCTAssertEqual(player.defaultRate, 1)
-        controller.beginBoost(); controller.setActive(false)
-        XCTAssertFalse(controller.isBoosting)
-        XCTAssertEqual(player.defaultRate, 1)
-        controller.stop()
+        for directRateControl in [false, true] {
+            let controller = try fixture.controller(usesDirectRateControl: directRateControl)
+            defer { controller.stop() }
+            await controller.activate()
+            let player = try XCTUnwrap(controller.player, "\(controller.phase)")
+            controller.beginBoost()
+            XCTAssertTrue(controller.isBoosting)
+            XCTAssertEqual(player.defaultRate, 2)
+            controller.endBoost()
+            XCTAssertFalse(controller.isBoosting)
+            XCTAssertEqual(player.defaultRate, 1)
+            controller.beginBoost()
+            controller.setActive(false)
+            XCTAssertFalse(controller.isBoosting)
+            XCTAssertEqual(player.defaultRate, 1)
+            XCTAssertEqual(player.rate, 0)
+        }
     }
 
     func testPiPKeepsSessionAliveWhileAppIsInactive() async throws {

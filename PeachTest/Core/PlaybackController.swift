@@ -34,6 +34,7 @@ final class PlaybackController: ObservableObject {
     var hasVideoSurface: Bool { player != nil || localPlayer != nil }
     private var foregroundActive = false
     private let previewOnly: Bool
+    private let usesDirectRateControl: Bool
     private let makeLocalPlayer: @MainActor (URL, LocalOriginalDecoder) -> (any LocalOriginalPlayer)?
     private var avOriginalURL: URL?
     private var didDisplayAVFrame = false
@@ -72,9 +73,10 @@ final class PlaybackController: ObservableObject {
     private var failedToEndObserver: NSObjectProtocol?
     private var didEnd = false
 
-    init(api: PeachAPI, item: PeachItem, previewOnly: Bool = false,
+    init(api: PeachAPI, item: PeachItem, previewOnly: Bool = false, usesDirectRateControl: Bool = false,
          makeLocalPlayer: (@MainActor (URL, LocalOriginalDecoder) -> (any LocalOriginalPlayer)?)? = nil) {
         self.previewOnly = previewOnly
+        self.usesDirectRateControl = usesDirectRateControl
         self.api = api
         self.item = item
         self.makeLocalPlayer = makeLocalPlayer ?? Self.defaultLocalPlayer
@@ -330,18 +332,35 @@ final class PlaybackController: ObservableObject {
     func beginBoost() {
         guard intent.mayPlay, !stopped, hasVideoSurface else { return }
         isBoosting = true
-        applyPlaybackIntent()
+        if usesDirectRateControl {
+            setBackendRate(2)
+        } else {
+            applyPlaybackIntent()
+        }
     }
 
     func endBoost() {
         guard isBoosting else { return }
         isBoosting = false
+        if usesDirectRateControl {
+            setBackendRate(1)
+            return
+        }
         if let localPlayer {
             localPlayer.setPlayback(intent.mayPlay && !stopped, rate: 1)
             return
         }
-        player?.defaultRate = 1
-        if intent.mayPlay, !stopped { player?.rate = 1 }
+        setBackendRate(1)
+    }
+
+    // Like NAS iOS, a speed gesture changes rate without issuing play/pause.
+    private func setBackendRate(_ rate: Float) {
+        if let localPlayer {
+            localPlayer.setRate(rate)
+        } else {
+            player?.defaultRate = rate
+            if intent.mayPlay, !stopped { player?.rate = rate }
+        }
     }
 
     func beginScrubbing(pausesPlayback: Bool = true) {

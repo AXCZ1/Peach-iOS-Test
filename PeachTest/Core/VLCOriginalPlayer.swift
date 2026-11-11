@@ -41,15 +41,7 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
         player.drawable = view
         let media = VLCMedia(url: url)
         if decoder == .software { media?.addOption(":no-hw-dec") }
-        // This binary is libVLC 3.0.23: it has no clock-master. A late PCR while
-        // clock-jitter is left at 5000 ms takes ES_OUT_RESET_PCR, flushes the
-        // pipeline and rebuffers. At 2x that stall is the frozen, late picture.
-        // Time-stretch then spends the catch-up on scaletempo instead of frames.
-        // The iOS audio output keeps already-converted sound until the rate
-        // change is late enough to flush it. A stepped rate never crosses that
-        // line, so the old speed plays out for about a second on press and
-        // release. 220 ms makes 1x→2x late by 110 ms (flush) and 2x→1x early
-        // by 110 ms, under the 120 ms silence insertion.
+        // Keep build 44's ordinary playback settings while changing rate control.
         if interactivePlayback {
             media?.addOption(":network-caching=220")
             media?.addOption(":clock-jitter=0")
@@ -80,7 +72,7 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
 
     func setPlayback(_ shouldPlay: Bool, rate: Float) {
         guard let player else { return }
-        player.rate = rate
+        setRate(rate)
         if shouldPlay, !playbackRequested {
             playbackRequested = true
             if didEnd {
@@ -98,6 +90,10 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
             onEvent?(.sample(position: reportingPosition, duration: duration(of: player), playing: false, hasFrame: hasFrame))
         }
         updatePulse()
+    }
+
+    func setRate(_ rate: Float) {
+        player?.rate = rate
     }
 
     func setMuted(_ muted: Bool) {

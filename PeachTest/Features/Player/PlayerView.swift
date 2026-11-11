@@ -33,7 +33,7 @@ struct PlayerView: View {
     @State private var marks: [ClimaxMark] = []
 
     init(item: PeachItem, api: PeachAPI) {
-        let controller = PlaybackController(api: api, item: item, makeLocalPlayer: { url, decoder in
+        let controller = PlaybackController(api: api, item: item, usesDirectRateControl: true, makeLocalPlayer: { url, decoder in
             VLCOriginalPlayer(url: url, decoder: decoder, interactivePlayback: true)
         })
         self.init(session: PlayerPresentation(api: api, item: item, controller: controller))
