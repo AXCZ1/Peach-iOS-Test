@@ -41,9 +41,15 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
         player.drawable = view
         let media = VLCMedia(url: url)
         if decoder == .software { media?.addOption(":no-hw-dec") }
-        // Rate changes affect future audio blocks, not blocks already queued for output.
-        // Keep the audio clock and adaptive jitter; shorten the ordinary player's queue.
-        if interactivePlayback { media?.addOption(":network-caching=300") }
+        // This binary is libVLC 3.0.23: it has no clock-master. A late PCR while
+        // clock-jitter is left at 5000 ms takes ES_OUT_RESET_PCR, flushes the
+        // pipeline and rebuffers. At 2x that stall is the frozen, late picture.
+        // Time-stretch then spends the catch-up on scaletempo instead of frames.
+        if interactivePlayback {
+            media?.addOption(":network-caching=300")
+            media?.addOption(":clock-jitter=0")
+            media?.addOption(":no-audio-time-stretch")
+        }
         player.media = media
         self.player = player
     }
