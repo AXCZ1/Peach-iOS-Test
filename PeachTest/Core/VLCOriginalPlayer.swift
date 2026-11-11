@@ -9,15 +9,9 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
     let view = UIView()
     var onEvent: ((LocalPlaybackEvent) -> Void)?
 
-    private let pacesRate: Bool
     private var player: VLCMediaPlayer?
     private var playbackRequested = false
     private var muted = false
-    /// VLC's integer rate is 1000 / speed. The getter on VLCMediaPlayer is not used.
-    private var appliedInverse = 1_000
-    private var rateTargetInverse = 1_000
-    private var rateRamp: Task<Void, Never>?
-    private var rateRampGeneration = 0
     private var hasFrame = false
     private var didEnd = false
     private var position = 0.0
@@ -39,7 +33,6 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
     }()
 
     init(url: URL, decoder: LocalOriginalDecoder, interactivePlayback: Bool = false) {
-        pacesRate = interactivePlayback
         _ = Self.installLogSink
         view.backgroundColor = .black
         view.clipsToBounds = true
@@ -52,11 +45,13 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
         // clock-jitter is left at 5000 ms takes ES_OUT_RESET_PCR, flushes the
         // pipeline and rebuffers. At 2x that stall is the frozen, late picture.
         // Time-stretch then spends the catch-up on scaletempo instead of frames.
-        // Display time also shifts by caching * (1/speed - 1). At 300 ms that is
-        // -150 ms on 1x→2x, past the 2x audio flush (~90 ms) and across the
-        // video queue, so the picture skips. 150 ms caps the whole shift at 75 ms.
+        // The iOS audio output keeps already-converted sound until the rate
+        // change is late enough to flush it. A stepped rate never crosses that
+        // line, so the old speed plays out for about a second on press and
+        // release. 220 ms makes 1x→2x late by 110 ms (flush) and 2x→1x early
+        // by 110 ms, under the 120 ms silence insertion.
         if interactivePlayback {
-            media?.addOption(":network-caching=150")
+            media?.addOption(":network-caching=220")
             media?.addOption(":clock-jitter=0")
             media?.addOption(":no-audio-time-stretch")
         }
@@ -85,10 +80,8 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
 
     func setPlayback(_ shouldPlay: Bool, rate: Float) {
         guard let player else { return }
-        let inverse = Self.inverseThousandths(of: rate)
+        player.rate = rate
         if shouldPlay, !playbackRequested {
-            cancelRateRamp()
-            applyInverse(inverse, on: player)
             playbackRequested = true
             if didEnd {
                 didEnd = false
@@ -99,17 +92,10 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
             applyMute(to: player)
             player.play()
         } else if !shouldPlay, playbackRequested {
-            cancelRateRamp()
-            applyInverse(inverse, on: player)
             playbackRequested = false
             firstFrameDeadline = nil
             player.pause()
             onEvent?(.sample(position: reportingPosition, duration: duration(of: player), playing: false, hasFrame: hasFrame))
-        } else if shouldPlay {
-            scheduleRate(inverse, on: player)
-        } else {
-            cancelRateRamp()
-            applyInverse(inverse, on: player)
         }
         updatePulse()
     }
@@ -131,7 +117,6 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
     }
 
     func stop() {
-        cancelRateRamp()
         pulse?.cancel()
         pulse = nil
         cancelSeek()
@@ -144,70 +129,6 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
         player.drawable = nil
         let retirement = VLCPlayerRetirement(player)
         Self.retirementQueue.async { retirement.stopAndReleaseWhenStopped() }
-    }
-
-    /// One inverse step is 0.1. At the 150 ms queue that moves the display
-    /// time by 15 ms, under one 60 fps frame and under the 60 ms audio drop.
-    /// libVLC collapses consecutive SET_RATE controls, so the next step waits
-    /// until a frame can observe this one.
-    private static let inverseStep = 100
-    private static let rateStepInterval: Duration = .milliseconds(50)
-
-    private static func inverseThousandths(of rate: Float) -> Int {
-        guard rate.isFinite, rate >= 0.25, rate <= 4 else { return 1_000 }
-        return Int((1_000 / rate).rounded())
-    }
-
-    private static func stepInverse(_ current: Int, toward target: Int) -> Int {
-        let delta = target - current
-        if abs(delta) <= inverseStep { return target }
-        return current + (delta > 0 ? inverseStep : -inverseStep)
-    }
-
-    private func applyInverse(_ inverse: Int, on player: VLCMediaPlayer) {
-        appliedInverse = inverse
-        player.rate = Float(1_000) / Float(inverse)
-    }
-
-    private func cancelRateRamp() {
-        rateRampGeneration += 1
-        rateRamp?.cancel()
-        rateRamp = nil
-    }
-
-    private func scheduleRate(_ target: Int, on player: VLCMediaPlayer) {
-        guard pacesRate else {
-            cancelRateRamp()
-            applyInverse(target, on: player)
-            return
-        }
-        if target == appliedInverse {
-            cancelRateRamp()
-            return
-        }
-        if rateRamp != nil, target == rateTargetInverse { return }
-        rateRampGeneration += 1
-        let generation = rateRampGeneration
-        rateRamp?.cancel()
-        rateRamp = nil
-        rateTargetInverse = target
-        let next = Self.stepInverse(appliedInverse, toward: target)
-        applyInverse(next, on: player)
-        if next == target { return }
-        rateRamp = Task { [weak self] in
-            var inverse = next
-            while !Task.isCancelled {
-                do { try await Task.sleep(for: Self.rateStepInterval) } catch { return }
-                let stepped = Self.stepInverse(inverse, toward: target)
-                guard let self, self.rateRampGeneration == generation, self.player === player else { return }
-                self.applyInverse(stepped, on: player)
-                inverse = stepped
-                if stepped == target {
-                    self.rateRamp = nil
-                    return
-                }
-            }
-        }
     }
 
     private func updatePulse() {
