@@ -32,7 +32,7 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
         VLCLibrary.shared().loggers = [logSink]
     }()
 
-    init(url: URL, decoder: LocalOriginalDecoder, interactivePlayback: Bool = false) {
+    init(url: URL, decoder: LocalOriginalDecoder) {
         _ = Self.installLogSink
         view.backgroundColor = .black
         view.clipsToBounds = true
@@ -41,12 +41,6 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
         player.drawable = view
         let media = VLCMedia(url: url)
         if decoder == .software { media?.addOption(":no-hw-dec") }
-        // Keep build 44's ordinary playback settings while changing rate control.
-        if interactivePlayback {
-            media?.addOption(":network-caching=220")
-            media?.addOption(":clock-jitter=0")
-            media?.addOption(":no-audio-time-stretch")
-        }
         player.media = media
         self.player = player
     }
@@ -72,7 +66,7 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
 
     func setPlayback(_ shouldPlay: Bool, rate: Float) {
         guard let player else { return }
-        setRate(rate)
+        player.rate = rate
         if shouldPlay, !playbackRequested {
             playbackRequested = true
             if didEnd {
@@ -90,10 +84,6 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
             onEvent?(.sample(position: reportingPosition, duration: duration(of: player), playing: false, hasFrame: hasFrame))
         }
         updatePulse()
-    }
-
-    func setRate(_ rate: Float) {
-        player?.rate = rate
     }
 
     func setMuted(_ muted: Bool) {

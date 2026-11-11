@@ -182,11 +182,11 @@ final class OriginalPlaybackTests: XCTestCase {
         XCTAssertNil(counts["plans"])
     }
 
-    func testOrdinaryPlaybackBoostChangesRateWithoutTransportOrSeek() async throws {
+    func testOrdinaryVLCBoostUsesPlaybackCommandsAndKeepsTheSession() async throws {
         let fixture = try OriginalPlaybackFixture()
         defer { fixture.stop() }
         let local = RecordingLocalPlayer()
-        let controller = try fixture.controller(id: 42006, usesDirectRateControl: true, makeLocalPlayer: { _, _ in local })
+        let controller = try fixture.controller(id: 42006, usesDirectAVRateControl: true, makeLocalPlayer: { _, _ in local })
         defer { controller.stop(); PlayerMemory.shared.clear(42006) }
         await controller.activate()
         local.showFrame(at: 2)
@@ -196,7 +196,7 @@ final class OriginalPlaybackTests: XCTestCase {
         XCTAssertEqual(local.rate, 2)
         controller.endBoost()
         XCTAssertEqual(local.rate, 1)
-        XCTAssertEqual(local.transportCalls, transportCalls)
+        XCTAssertEqual(local.transportCalls, transportCalls + 2)
         XCTAssertTrue(local.playing)
         XCTAssertNil(local.seekTarget)
         XCTAssertTrue(controller.localPlayer === local)
@@ -417,12 +417,12 @@ struct OriginalPlaybackFixture {
 
     @MainActor
     func controller(id: Int = 42001, name: String = "fixture.mp4", previewOnly: Bool = false,
-                    usesDirectRateControl: Bool = false,
+                    usesDirectAVRateControl: Bool = false,
                     makeLocalPlayer: (@MainActor (URL, LocalOriginalDecoder) -> (any LocalOriginalPlayer)?)? = nil) throws -> PlaybackController {
         PlayerMemory.shared.clear(id)
         let item = try JSONDecoder().decode(PeachItem.self, from: Data("{\"id\":\(id),\"name\":\"\(name)\",\"duration\":24}".utf8))
         let controller = PlaybackController(api: PeachAPI(baseURL: baseURL), item: item, previewOnly: previewOnly,
-                                            usesDirectRateControl: usesDirectRateControl,
+                                            usesDirectAVRateControl: usesDirectAVRateControl,
                                             makeLocalPlayer: makeLocalPlayer)
         controller.setMuted(true)
         return controller
@@ -450,7 +450,6 @@ private final class RecordingLocalPlayer: LocalOriginalPlayer {
         playing = shouldPlay
         self.rate = rate
     }
-    func setRate(_ rate: Float) { self.rate = rate }
     func setMuted(_ muted: Bool) { self.muted = muted }
     func seek(to time: Double, completion: @escaping (Double?) -> Void) {
         seekTarget = time

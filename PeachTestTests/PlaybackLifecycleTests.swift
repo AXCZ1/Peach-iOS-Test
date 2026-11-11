@@ -84,7 +84,7 @@ final class PlaybackLifecycleTests: XCTestCase {
         let fixture = try OriginalPlaybackFixture()
         defer { fixture.stop() }
         for directRateControl in [false, true] {
-            let controller = try fixture.controller(usesDirectRateControl: directRateControl)
+            let controller = try fixture.controller(usesDirectAVRateControl: directRateControl)
             defer { controller.stop() }
             await controller.activate()
             let player = try XCTUnwrap(controller.player, "\(controller.phase)")
