@@ -33,8 +33,7 @@ struct PlayerView: View {
     @State private var marks: [ClimaxMark] = []
 
     init(item: PeachItem, api: PeachAPI) {
-        let controller = PlaybackController(api: api, item: item, usesIndependentVLCClock: true)
-        self.init(session: PlayerPresentation(api: api, item: item, controller: controller))
+        self.init(session: PlayerPresentation(api: api, item: item))
     }
 
     init(session: PlayerPresentation, preserveOnExit: Bool = false) {
@@ -183,12 +182,9 @@ struct PlayerView: View {
                     .position(x: center, y: geometry.size.height / 2)
             }
             if case .seek(let seconds, let forward) = feedback {
-                VStack(spacing: 4) {
-                    feedbackSymbol(forward ? "goforward" : "gobackward")
-                    Text(seconds > 0 ? "+\(seconds)" : "\(seconds)")
-                        .font(.system(size: 18, weight: .semibold).monospacedDigit())
-                        .foregroundStyle(.white)
-                }
+                Text(seconds > 0 ? "+\(seconds)" : "\(seconds)")
+                    .font(.system(size: 18, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(.white)
                 .position(x: geometry.size.width * (forward ? 0.875 : 0.125), y: geometry.size.height / 2)
             }
         }
