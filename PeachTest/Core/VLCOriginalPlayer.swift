@@ -311,7 +311,7 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
         let playCall = playCallMilliseconds.map { "播放调用 \($0)ms" } ?? "播放调用未计时"
         let seekCall = seekCallMilliseconds.map { "跳转调用 \($0)ms" } ?? "未调用跳转"
         let target = pendingSeek.map { String(format: "目标 %.1f", Double($0.target) / 1_000) } ?? "无跳转"
-        let layerText: String
+        var layerText: String
         if let layer = pictureInPictureLayer {
             switch layer.status {
             case .unknown: layerText = "画面层 unknown"
