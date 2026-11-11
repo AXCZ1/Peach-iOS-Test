@@ -1,187 +1,58 @@
-# 当前继续点（2026-11-10）
-
-独立 Peach App **构建 34** 已校验并交付到 `C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.34.ipa`。进度条小图改为限速滚动并发，同步独立于设置页，iOS 暂停后回到 App 可续做；沿用构建 32 的缓存。源码 `f03f909b6cd2f35593c9c76834f63ebf7bf918db`，Codemagic `6af2da606b25a52a41acd544`；真机待验收，见 ACCEPTANCE.md 首节。
-
-## 构建 32 历史
-
-独立 Peach App **构建 32** 已校验并交付到 `C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.32.ipa`。进度条提前缓存 Media Browser 已生成的 WebP 小图，普通播放与随机连播从手机磁盘读取。NAS 不打缩略图包，详情页阅览图与播放墙未改。源码 `4b624c85dd407e750362cd5c4c2fbfe6b7f1d15a`，Codemagic `6af2b59cb6563a81b57c1899`；真机步骤见 ACCEPTANCE.md 首节。
-
-## 构建 31 历史
-
-独立 Peach App **构建 31** 已校验并交付到 `C:/Users/mo/Downloads/NAS-unsigned .31.ipa`。索引和分类作品列表在返回时复用已加载的数据。源码 `2a662f6738ca0809ec3e31a5cc9056457b3a3aea`，Codemagic `6af1fca97be2a39892c9a83f`。真机待确认滚动位置，见 ACCEPTANCE.md 首节。
-
-## 构建 30 历史
-
-独立 App **构建 30** 已校验并交付到 `C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.30.ipa`。整库扫描现在显示逐张进度，同一部连续两张取帧失败后先继续下一部，保留已存原图以便补缺。源码 `55b4c2d8a76fc7ed4b3de0aed936ca973782a2fd`，Codemagic `6af16f297cd45783ed247d73`。待 iPhone 复测，见 ACCEPTANCE.md 首节。
-
-## 构建 29 历史
-
-独立 App **构建 29** 已编译、校验并放入 Downloads：`C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.29.ipa`。整库原图缓存、排序记忆、下滑返回、随机连播横屏和高潮点待 iPhone 验收。详见 ACCEPTANCE.md 首节。
-
-- 源码 `9f1c3f2eeedb5b59e9734e5f959e48e1e75e0cb6`，Codemagic `6af0cbeaa1b4111a0a6c3413`。构建 27 保留回退，改动前备份为 `backups/preview-player-20261109-030505/source.zip`（`0c972b1`）。
-- 构建 27 在真机仍有 SONE-081 黑屏，构建 29 未调整该解码路径。未修改服务端、媒体或 NAS iOS。
-
-## 构建 27 历史
-
-独立 App **构建 27** 已校验并放入 Downloads；iPhone 复测 SONE-081 仍黑屏。VLC 起播已收到数据但未输出首帧时，使用同一原文件在手机上以软件解码重试一次。其余播放和预览仍用原文件。
-
-- IPA：C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.27.ipa；源码 `9f81cd04eaa3207cccbc1e2c6700f186c5321878`，Codemagic `6aefe2910e0f7ecdb5f76a2b`。只读排查、回归和真机步骤见 ACCEPTANCE.md 首节。
-- 保留构建 26 IPA 回退。
-
-## 构建 26 历史
-
-独立 App **构建 26** 已校验并放入 Downloads，待 iPhone 验收。详情提前缓存原图；大图静音片段和详情取帧都已切到原文件，由 iPhone 解码。普通播放、沉浸及播放墙继续读原文件。
-
-- IPA：C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.26.ipa；源码 `9736b8818d1b184d04769a60b1c0c32f14425407`，Codemagic `6aef8a454b804ab4e2e0ea3a`。校验和真机步骤见 ACCEPTANCE.md 首节。
-- 构建 23 的 IPA 保留回退；提前缓存阶段的源码备份为 `backups/local-preview-decode-20261108-041442/source.bundle`（`02bd7ee`）。
-
-## 构建 23 历史
-
-独立 App **构建 23** 已校验并放入 Downloads，待 iPhone 验收。普通播放横拖跨度减半，详情页预览条直接显示可见帧的原图，点开复用；播放墙、沉浸和小窗保持构建 22 的行为。
-
-- IPA：C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.23.ipa；源码 `1295a997a54de644859dac3e61129be533512b7c`，Codemagic `6aef7ac245a3d9dc5191530e`。校验和真机步骤见 ACCEPTANCE.md 首节。
-- 保留构建 22 回退。
-
-## 构建 22 历史
-
-独立 App **构建 22** 已校验并放入 Downloads。VLCKit 4.0.0a25 的画面可以接入系统小窗；普通播放左右拖动画面预览并调整进度，播放墙及从墙打开的全屏保持原手势。正式播放仍由 iPhone 解码 Peach 原文件。
-
-- IPA：C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.22.ipa；20,899,961 字节；SHA256 `1148d4fb611c49420591f09099e2b639be2f249ef1797f59161336a8df281d4a`。
-- 源码 `4c4644f9a1bdf3766992f923cb86a07eef23c4fd`，Codemagic `6aef74cea3dc1d99849ebb15`。Debug/Release 各 49 通过、3 跳过；iPhone Release 和 IPA 校验通过。见 ACCEPTANCE.md 首节。
-- 真机待用 IPZZ-991 验证系统小窗和起播速度，并回归普通播放拖动、AVPlayer 小窗及播放墙。用户已反馈构建 20 播放变快；保留构建 20 的 IPA 和源码备份 `backups/vlc-pip-20261108-001740/source.bundle`（`d163e33`）。
-
-## 构建 20 历史
-
-独立 App **构建 20** 已校验并放入 Downloads。正式播放从 Peach 取原文件 Range 地址，在 iPhone 上用 AVPlayer 或 MobileVLCKit 3.7.3 解码；普通、沉浸和播放墙共用。正式播放取消 HLS 转码回退，卡片与图片预览保持既有路径。VLC 分支没有系统画中画，AVPlayer 保留。
-
-- IPA：C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.20.ipa；17,160,095 字节；SHA256 `6236941b7e0fcf34161f9383d5a915416e9b98a9ffc9b239523d9037518ff8c9`。
-- 源码 `bffd25cf5061b0c1a8538d769a85935c6f85a71e`，Codemagic `6aef4b7524d1a22fe16b68e0`。Debug/Release 各 48 通过、3 跳过。编译从固定 Podfile.lock 生成 `PeachTest.xcworkspace`，IPA 验证链接和内嵌 VLC。
-- IPZZ-991 的旧版日志：原文件 Range 成功后退 HLS，冷分片约 2–4 秒。构建 20 待用 iPhone 验证其画面、拖动和墙内切换；见 ACCEPTANCE.md 首节。服务端、媒体及 NAS iOS 未改。
-- 回退保留构建 19；源码备份 `backups/phone-local-playback-20261107-234246/source.bundle`（`3292a93`）。
-
-## 构建 19 历史
-
-独立 App **构建 19** 已校验并放入 Downloads。恢复原底栏位置和 60 点高度，馆藏内容接到栏顶。域名反代下的原文件播放取票不发送浏览器来源头，仍需认证；未改 Peach 服务端、媒体、NAS iOS 或播放墙布局。
-
-- IPA：C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.19.ipa；1,552,673 字节；SHA256 `965a588b61f294e9c07ccd1c4fb6d20bcd982662fd041c4573c230f9422f6828`。
-- 源码 `618aac185ace1dabb2227bc672cceec8e3e09c60`，Codemagic `6aef3f1df43f28dd128f0a63`。Debug/Release 各 46 通过、3 跳过；实际 HMN-834 取票 200、首尾 Range 206，未认证取票 401。
-- 真机按 ACCEPTANCE.md 首节检查底栏与 HMN-834。保留构建 18 回退。
-
-## 构建 18 历史
-
-独立 App **构建 18** 已打包校验并放入 Downloads。普通全屏、沉浸及播放墙内嵌使用原文件优先，AVPlayer 检查视频轨能否解码，必要时回退 Peach 既有兼容流。墙内切全屏沿用会话；未改服务端、域名、媒体、大图预览或 NAS iOS。
-
-- IPA：C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.18.ipa；1,552,120 字节；SHA256 `0f88a4be9ada0b5da11053f7efc974a1fbc12e04fff2185445fd1c0d69bbcf2b`。
-- 源码 `a50d94e310f07a7ff1fb902343aac4c6cad418e1`；Codemagic `6aef0d4804bc42b5d4ae7294`。Debug/Release 各 46 通过、3 跳过，iPhone Release 编译与 IPA 校验通过。
-- IPZZ-991 和 MIDA-574 的实际原文件 Range 读取一致；云端 Mac 验证 H.264 起播、拖动、原帧和兼容回退，报告 HEVC `hev1` 视频轨不可解码。真机按 ACCEPTANCE.md 首节验证 IPZZ-991 首帧、跳转和播放墙；只有手机显示「原文件直放」且出画面才能确认这部片绕开软路由转码。
-- 回退保留构建 13；源码回退点 `8421ac8`，备份 `backups/original-playback-20261107-190910/source.bundle`。NAS 82 的 SHA256 已核对不变。
-
-## 构建 13 历史
-
-独立 App **构建 13** 已打包和校验，等待 iPhone 验收。仅改 App 的四项反馈：详情预览宽高各翻倍、秒开已有图并提前取原画；大图预览首帧与缓冲；横屏进度区；馆藏导航上方黑边。播放墙内嵌、NAS iOS、域名、后端和媒体未改。
-
-- IPA：C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.13.ipa；1,537,197 字节；SHA256 `0ce060f8713ba2b4b8e59ebc3ce200825859625a1ca44496a91f7d86d8822efb`。
-- 源码 `e0fa70f10dafd085af952ddd6035f9e99009a93a`，Codemagic `6aeeebcf630282fcf14921fb`。Debug/Release 各 41 通过、3 跳过。原帧和缓冲时钟测试通过，未启动模拟器。
-- 真机验证按 ACCEPTANCE.md 首节，优先 START-108 大图、冷取 4K 原画、横屏与底栏。回退包保留构建 12，回退前源码状态为 `0aef8d3`。
-
-## 构建 12 历史
-
-当前交付是独立 App **构建 12**，用户自行配置域名，本轮只改 App；不接入 NAS iOS，也不改播放墙内嵌播放器、服务端或媒体。
-
-- IPA：C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.12.ipa；1,511,320 字节；SHA256 `1cae105c790a73b240e2bfb96e5fd52da85e33f5e35a255ee5e839a27b89db97`。
-- 构建 12 源码 `9e968bc9c11c7f94644695d329f716a075584ea2`；Codemagic `6aeed913ab4a65afcf3fa24c` 已完成，证据在 `artifacts/codemagic-12/`。Debug/Release 各 40 通过、3 跳过；本地 HTTP Cookie 续期测试通过，真机待验收。
-- PlayerView、ImmersiveView、PlaybackOrientation：去掉影院模式，普通播放直接全屏，按钮切换横屏。WallFocusView、VideoWallView 未改；正常播放会话及 PiP 路径保留。
-- PeachSession、SavedPeachPassword、PeachAPI：HTTPS 域名、设备钥匙串及 Cookie 续期；无服务端认证改动。MediaDiskCache、CachedPreviewAsset、OriginalVideoFrame、PreviewFilmstrip：封面、原尺寸预览、受限 MP4 片段缓存。HLS 预览视频仍在线播放。
-- 验收见 ACCEPTANCE.md 首节。回退：构建 11 IPA 保留；修改前源码 bundle `backups/standalone-cache-20261107-152305/source.bundle`（`fc0205f`）。NAS 82 SHA256 已核对无变化。继续仅手动跑 Codemagic `ios-unsigned-ipa`，不启用 Actions、不启动 Simulator。
-
-## 构建 11 历史
-
-本轮已授权执行，不再是规划任务。视频预览、30 张截图、单行筛选、倍速、播放模式及原版播放墙已交付构建 11。未接入 NAS iOS，不动构建 82。下文构建 9 是回退历史。
-
-- 用户录屏 QQ2026117-25419.mp4 的 12–20 秒是封面内静音原视频短片段，不是图片轮播；30 张图用于详情/进度条。
-- 构建 11：源码 317464a7f5b52a482d86d250348d719277b6ec8e；Codemagic 6aee9b179c7ac8eab4e9bc93，finished。
-- IPA：C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.11.ipa；1,420,727 字节；SHA256 389b6624b9870fbf9183054fe3c2910db88dc1e132577e80d3eabe5cc896674e。
-- Debug/Release 各 35 通过、2 个 LAN 用例跳过（本地通过），Release 编译、云端及本地 IPA 校验完成；真机未验收。构建 10 测试 fixture 缺 id 的失败已修复，不能把 10 交付。
-- 此处交付后只更新文档，不为文档触发构建；下一步由用户验收大图静音片段、手势、PiP 和播放墙。
-- 本地 33 项核心及单独 2 项真实隔离接口回归无失败。Mac AVFoundation 4 项已在云端 Debug/Release 均通过。
-- 生产官方 0.52.0 容器新增兼容缓存助手和每 10 分钟 cron，媒体只读；55 部各 30 帧。原 54 个源大小和 mtime 不变，第 55 条自动补齐。
-- 助手路径、算法、cron 备份及回退见 ACCEPTANCE.md；不可恢复整份旧 cron 覆盖其他任务。
-- 修改前源码备份 backups/previews-wall-20261107-024810/source.bundle，回退 f4fbcd8。
-- 只执行 ios-unsigned-ipa，不启用 Actions，不启动 Simulator。
-
----
-
 # Peach iOS Test 当前交接
 
-更新日期：2026-11-07。最新交付是独立测试 App 构建 **9**，已编译、打包并校验，等待用户真机验收。未接入 NAS iOS；NAS 构建 82 未改动、未覆盖、未重新打包。用户已确认登录问题解决，本轮未改动登录语义。
+更新日期：2026-11-11。最新交付为独立 Peach App **构建 40**；已编译、打包、校验并交付，**尚未收到构建 40 的 iPhone 实测结果**。本次交接只整理文档，不重新构建。
 
 ## 当前项目路径和运行方式
 
-- 【PC PowerShell｜项目目录 C:\Users\mo\Documents\Codex\Peach-iOS-Test】独立 SwiftUI 工程，独立仓库 https://github.com/AXCZ1/Peach-iOS-Test，分支 main。
-- 原 NAS iOS 工程 C:\Users\mo\Documents\Codex\NAS-ios 只作设计参考；未修改其源码、分支、构建配置或产物。
-- 后端默认地址 http://192.168.5.5:8900/，测试 App 内可修改。实际部署为 Peach 0.52.0，访问密码模式；媒体库“夯”，当前接口返回 54 部作品。
-- 工程为 PeachTest.xcodeproj，scheme PeachTest；Bundle ID com.axcz1.peachios.test，显示名 Peach Test，最低 iOS 17.0，仅 iPhone ARM64。
-- IPA 入口是 codemagic.yaml 中唯一的 ios-unsigned-ipa，只手动触发。Codemagic 应用 ID 6aed85f0165a22c4d4b043a0。构建脚本 scripts/build-unsigned-ipa.sh；不跑 Simulator，不启用 GitHub Actions。
-- 构建 9 源码提交：80075b14988034803363dff9f03cde8047f6e2d4；构建 ID：6aee0c4c52103eb5dbe40626。
-- 交付文件：C:\Users\mo\Downloads\Peach-iOS-Test-unsigned.9.ipa，1,284,041 字节，SHA256 e7d6c34268f802d3f5b53ab037ba0d744fd33ef068731d5b417fd2599f0dd687。
-- 构建 8 回退包：C:\Users\mo\Downloads\Peach-iOS-Test-unsigned.8.ipa，1,165,459 字节，SHA256 E99A1F09EB445B4AAC76225F478DC65E7A8037F489809649431255BB3399E7AD；源码 b993ab02fcde3fd79055e171c649178d5b6b9e1f。
-- 构建 7 的 NAS-unsigned .7.ipa 保留在 Downloads 作为上一版校验包（SHA256 D80FC449E6D8E4931CC3E13373CFD5DDCE251CDB26E432E5DD788EC65F730BEB）。
-- 验证证据：artifacts/codemagic-9/，包含 IPA、完整编译步骤日志、云端与本地 IPA 校验；Debug/Release 各 27 项通过、2 项局域网测试跳过、0 失败，BUILD SUCCEEDED。
+- 【PC PowerShell｜项目目录 `C:/Users/mo/Documents/Codex/Peach-iOS-Test`】独立 SwiftUI 项目，仓库 https://github.com/AXCZ1/Peach-iOS-Test，分支 `main`。
+- 构建 40 源码：`e998ee3333bb49a91a0bd654e9b782e76b63f728`，已推送；之后的交接文档提交不改变 IPA 内容。Codemagic 构建 ID：`6af40be5ee23c91ac258825d`，状态 finished。
+- IPA：`C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.40.ipa`，21,125,409 字节；SHA256 `5216bea7f3f02cd98c930cc84ef043f0056753c1b27eca3ca6709aa096f23971`。同号 NAS 安装包已存在，保留未覆盖，因此使用 Peach 文件名。
+- Bundle ID `com.axcz1.peachios.test`，显示名 `Peach Test`，iOS 17.0+，iPhone ARM64，无签名；安装仍用用户现有签名方式。
+- `codemagic.yaml` 的 `ios-unsigned-ipa` 调用 `scripts/build-unsigned-ipa.sh`；Pod 安装后使用 `PeachTest.xcworkspace` / `PeachTest` scheme。Codemagic 应用 ID `6aed85f0165a22c4d4b043a0`。API 凭据由进程环境提供，不写入仓库。
+- 后端为用户自管 Peach 0.52.0；App 支持局域网地址和 HTTPS 域名，登录态及密码保存在设备。馆藏数量会变化，不沿用历史 54 部作为当前事实。本轮未重新探测后端。
+- `C:/Users/mo/Documents/Codex/NAS-ios`、`C:/Users/mo/Documents/Codex/media-browser` 仅作参考，当前工作不修改它们。本项目没有需要同步软路由 HANDOVER 的既定双端安排。
 
 ## 当前功能状态
 
-- 已实现：登录、馆藏网格、封面/标题/番号、搜索与历史、状态条、排序与换一批、演员/标签/厂牌筛选、索引页、资料页与实体收藏、详情页。
-- 播放：AVPlayer + HLS 播放计划、每会话取消、续播记忆、起播计数与每 10 秒观看统计、±10 秒、拖动。
-- 浏览体验：沉浸模式（固定随机种子按 60 条续载、上下连播、左右各 25% 双击跳 10 秒、中央双击播放/暂停、单击显隐、横滑 seek、动作列与计数撤销）；普通播放器采用同一双击分区。播放墙保留 12 格拼贴、封面/缩略图、声音、聚焦层、稍后看/详情。
-- 馆藏大图：3:4 正封及演员头像、日期、大小、标签；小图选择保持持久化。时长精确到秒。两种播放器拖动进度条读取已有时间轴/九宫格预览，缺少预览时不生成新文件。
-- 个人记录：记一次高潮与撤销、评分与取消、稍后看、喜欢、看过、不合口味，均以服务端回执刷新；详情、卡片与播放墙显示状态。
-- 管理只读：任务中心、配置、扫描/资料处理、关注、下载状态；不提供删除、复核、下载提交、认证或部署写操作。
-- 功能对照表：FEATURE-MATRIX.md，逐项列出原版入口、实际行为、接口、iOS 入口与验收状态。
-- 用户此前已安装构建 8 并提供截图；构建 9 的真机安装、播放、手势及视觉效果尚未验证，不能以编译和接口探测代替真机结论。
-
-## 本轮验证证据
-
-- 隔离实例：容器 peach-ios-test，同一 0.52.0 镜像，复制 /data 到 /tmp/peach-test-data，监听 192.168.5.5:18900；未改生产容器、配置或媒体。
-- 本轮隔离接口测试：实际 PeachAPI 计数 5→6→5，重复消费同一撤销只发送一次；结束后恢复隔离影片原计数。读取真实索引、实体资料、头像、正封字段与已有预览图成功。
-- 生产仅只读复核：JUQ-575 的 o_count/rating 为空、watch_later/liked 为 0；当前 play_count=2、leave_ratio=0.16163170874744334，是读取时的真实值，不能沿用构建 8 的全零记录。本轮未在生产写测试记录。
-- 本地 WSL Swift 6.1.3：27 项通过，含 2 项隔离实例测试。Codemagic 构建 9 的 Debug/Release 各 27 项通过、2 项局域网测试跳过；新增实际 PlaybackController 迟到计划测试通过；无签名 iPhone ARM64 Release 编译与 IPA 校验通过。
+- 独立 App 已有馆藏、索引/分类、搜索与历史、筛选与排序记忆、详情、个人记录、随机连播、播放墙和系统小窗；管理入口以只读状态为主。功能清单参考 `FEATURE-MATRIX.md`，其中验收状态可能落后于最新代码。
+- 原文件在 iPhone 上由 AVPlayer 或 VLCKit 4.0.0a25 解码，正式播放不回退 NAS HLS 转码。VLC 无首帧且已收到数据时可用软件解码重试一次；这不代表所有作品已能播放。
+- 两套图片缓存必须区分：详情阅览图使用 `OfflinePreviews` 原尺寸 PNG，支持手动整库扫描、续做和补缺；进度条使用 `MediaBrowserSeekClient` / `SeekPreviewCache` 提前同步 NAS 已生成的 WebP 小图。NAS 不打缩略图包；进度条缓存改动不应改变详情原图。
+- 构建 34 将进度条小图同步改为受限滚动并发、App 生命周期持有任务，离开设置页仍可继续；iOS 后台暂停后回到 App 续做。构建 36 合并快速拖动的缩略图请求并提前加载图库相邻原图。历史证据参考 `ACCEPTANCE.md`、对应提交及 `artifacts/codemagic-*/`，不能仅凭实现认定真机问题已消失。
+- 普通播放手势：左右各 25% 双击 ±10 秒，中央双击播放/暂停；同侧每次有效快进/退后重新开放 700ms 单击续窗。提示按实际累计位移显示 `+10 / +20 / +30` 或负数，已去掉快进/退图标；播放/暂停白色图标保留，暂停时常驻。
+- 普通画面横滑跨度是全宽对应片长的 0.05；拖动时维持原播放/暂停状态，松手提交 seek。长按识别为 250ms，按下请求 2×、松手恢复 1×。播放墙的既有手势和内嵌播放器不套用普通播放器改动。
+- 构建 40 的定向修改：撤回构建 38 的 `clock-master=monotonic`，恢复 VLC 默认音频主时钟；仅 `PlayerView(item:api:)` 创建的普通播放器通过工厂启用 `interactivePlayback: true`，设置 `network-caching=300`（默认原为 1000ms）。保留自适应 jitter，不在切速时强制 seek、暂停或重建。播放墙、随机连播、卡片预览仍用默认配置。
+- 涉及文件：`PeachTest/Core/PlaybackController.swift`（撤回时钟参数），`PeachTest/Core/VLCOriginalPlayer.swift`（默认时钟及普通播放缓冲），`PeachTest/Features/Player/PlayerView.swift`（定向入口和快进提示）。700ms 规则位于 `PeachTest/Core/MediaPresentation.swift`。
+- 验证：本地 `MediaInteractionTests` 14 项通过；构建 40 工作流中的 Debug/Release 核心测试、iPhone ARM64 Release 编译及云端 IPA 校验成功。本地重新核对 ZIP、Info.plist、ARM64、无签名和 SHA256。证据在 `artifacts/codemagic-40/ipa-validation.json`、`build-summary.txt`、`xcodebuild.log`。未启动模拟器，未实测真机倍速延迟。
+- `ACCEPTANCE.md` 首节目前仍为构建 34，不能当作构建 40 的验收回执；本文件记录当前继续点，旧构建详情继续查原记录及 Git 历史。
 
 ## 当前稳定备份
 
-- 构建 9 源码已推送至独立仓库 main 的 80075b1；之后仅更新交付文档，不为文档再触发构建。
-- 构建 9 是待真机验收的交付候选；构建 8 保留作回退。修改前回退点 b347adc，源码 bundle：backups/player-fixes-20261106-195853/source.bundle。
-- NAS 构建 82 保持原状：C:\Users\mo\Downloads\NAS-unsigned .82.ipa，19,135,903 字节，SHA256 fa01e9f509b5c269edff888fb872ae44624f050eb0bb16d799e8453d9c9e12e4。
+- **没有已确认消除倍速问题的稳定版本。** 构建 37 的 IPA 仍在 Downloads，源码 `d544e7a1b160a8523a2e63bfa4ef393ff1b7fb29`；用户已报告 VLC 实际切速和松手恢复各延迟约 1–2 秒，只能作为回归前比较点，不能称为无缺陷稳定版。
+- 构建 38（`207c3385dcc8d44da0dace2a02037a14d0960693`）强改时钟后，用户报告卡死、无声、声音卡住和掉帧；**不要恢复该时钟方案，也不要推荐构建 38 回退**。
+- 构建 39（`37eff0c87bbeee3bd3421dc0c9bc4f1b4fe3d12b`，Codemagic `6af409e2785c68ee929f4ccb`）只撤回时钟并删快进图标，云端成功但未作为最终修复交付；用户明确不接受仅回退旧状态作为解决方案。当前继续点是构建 40。
+- 既有源码备份保留：`backups/preview-player-20261109-030505/source.zip`（`0c972b1`）、`backups/local-preview-decode-20261108-041442/source.bundle`（`02bd7ee`）、`backups/vlc-pip-20261108-001740/source.bundle`（`d163e33`）及其他历史备份。它们只覆盖源码，不代表后端或媒体备份；本轮不新增或清理备份。
+- NAS 构建 82 和原工程未在本轮修改或重新打包；历史校验见 `ACCEPTANCE.md`。本轮未重复验证其文件哈希。
 
 ## 必须遵守的规则
 
-- 沿用本任务的 iOS 规则：仅手动触发 Codemagic ios-unsigned-ipa；不跑 Simulator；不启用 GitHub Actions；验收以 iPhone 真机为准。
-- 不修改或覆盖 NAS 工程及构建 82。测试版交付后停在这里，必须等用户明确同意才能接入 NAS iOS。
-- 管理写操作、删除、迁移、认证、挂载和全库任务不以生产库为测试环境；真实馆藏只做只读探测。
-- 具体 Git、备份和交接规则见 C:/Users/mo/.codex/instructions/git-safety.md、C:/Users/mo/.codex/instructions/recovery-handover.md；iOS 执行规则参考 C:/Users/mo/Documents/Codex/NAS-ios/AGENTS.md。
+- 权威规则：本项目 `AGENTS.md`、`C:/Users/mo/.codex/instructions/git-safety.md`、`C:/Users/mo/.codex/instructions/recovery-handover.md`。工作区 `AGENTS.md` 是用户提供的未跟踪文件，保留，不混入交接或代码提交。
+- 只改独立 Peach App；用户已决定不接入 NAS iOS。域名用户自行配置，不修改服务端、源媒体、NAS 项目、自动采集或播放墙内嵌播放器。
+- 仅手动触发 Codemagic `ios-unsigned-ipa`；同一提交/工作流已有构建不重复启动，不为文档构建。GitHub Actions 保持禁用；未经明确授权不启动 Simulator。
+- iPhone 真机反馈才是播放和手势验收结论。编译、API 成功、纯逻辑测试都不能证明 VLC 音画已恢复正常。限定修改范围，检查共享组件调用方，不借机改缓存、布局或其他播放器。
+- 当前代码提交已在远程；仅为实际交接整理并提交 HANDOVER。不得覆盖已有 Downloads 同名文件，必须先核对哈希。
 
 ## 未解决问题
 
-- 构建 9 尚未完成 iPhone 真机安装、与构建 82 共存、同 Wi-Fi 登录、浏览/搜索、详情、MP4/MKV 播放、拖动和手势验收。
-- HLS 仅验证到服务端播放列表与首个分片；AVPlayer 在真实 iPhone 上的 HLS 兼容性、起播延迟、拖动与 MKV 解码仍需实测。
-- 沉浸模式只保留一个活动播放器；播放墙是手机尺寸拼贴，没有桌面播放墙的无限世界平移。
-- 播放列表只做新建与续播；改名/删除/排序未做。
-- 照片墙大图/小图未做（当前实例无照片墙页面）。
+- **首要问题：VLC 长按 2×及松手后的真实音画响应。** 用户明确说 2× 提示及时，延迟的是画面速度；解码显示「原文件直放 · VLC」或「VLC 软件解码」。不要再次把问题当作长按识别延迟，也不要重复询问这两个已确认事实。
+- 构建 40 的 300ms 缓冲旨在缩短旧速率音频队列的等待；依据来自 VLC HTTP PTS delay、音频输出排队及切速源码，不是手机测量。尚不能确认卡死、无声、掉帧及 1–2 秒延迟已解决；较短缓冲在网络抖动时的表现也未实测。
+- 本地源代码调查在 `artifacts/upstream/vlc-rate/`，来自 VideoLAN 上游 master，**不保证等于内嵌 4.0.0a25 的准确源码版本**；只确认内嵌 iOS 二进制包含 `network-caching` 选项。继续定位应优先采集实际播放证据，避免再凭通用源码推测修改音画时钟。
+- 历史 SONE-081 在构建 27 仍黑屏，用户没有给出后续解决回执；构建 40 未修这个单片问题。
+- 快拖进度条黑图、详情原图预缓存后偶发转圈、拖进度画面静止均已有定向改动，但本会话没有收到完整真机通过回执；不要将旧未确认问题一并宣称解决。
+- 播放列表改名/删除/排序、部分管理写操作和照片墙等未完成范围参考 `FEATURE-MATRIX.md`，不属于当前倍速修复任务。
 
 ## 下一步任务
 
-1. 用户安装构建 9，按 ACCEPTANCE.md 验收索引、大图、时长、普通/沉浸手势、进度预览和撤销，反馈实际结果。
-2. 保持 NAS 构建 82 和原 NAS 工程不变；不要自行重新构建或接入。
-3. 只有用户明确同意接入 NAS iOS 后，才在独立测试版基础上评估集成范围。
-
-
-
-## 构建 9 修复交付（2026-11-07）
-
-用户已授权本会话执行：此前 5 个缺陷、索引、大图正封样式、统一双击手势、已有进度缩略图、精确时长。代码、相关测试、Mac 编译、IPA 下载校验均已完成；构建 9 已放到 Downloads，等待真机反馈。
-
-- 改动和真机验收清单见 ACCEPTANCE.md；完整功能目标的后续项见 FEATURE-MATRIX.md。
-- 回退点 b347adc，修改前源码 bundle 位于 backups/player-fixes-*；没有备份或修改真实媒体。
-- 预览只读 /api/timeline、/timeline、/thumb，九宫格在客户端裁切，不调用服务端生成接口。
-- 两种播放模式统一左右各 25% ±10 秒、中央 50% 播放/暂停，单击显隐；用户已确认该交互。
-- Codemagic API 凭据来自本机进程环境 CODEMAGIC_API_TOKEN，不写入文档或仓库。
-- 本轮交付到此，仍不得自行接入 NAS iOS。继续任务时以用户真机反馈为准，不重复触发已成功的同提交构建。
+1. 以构建 40 的真机反馈继续：同一出现问题的作品分别短按住、持续按住及反复按住/松手，检查实际音画进入 2×、恢复 1×的时间，以及卡顿、无声和掉帧。不要把提示响应当作播放速度证据。
+2. 若仍失败，针对 VLC 输入缓冲、音频输出排队及实际播放时间推进可复现诊断；分清事实、推断和待测项。仅回退、调识别时间或再强改时钟都不能当作完整修复交付。
+3. 一并检查快进仅显示真实累计秒数，每次快进后的 700ms 均可续点；回归普通拖动、暂停、退出和 PiP，保持播放墙内嵌行为。
+4. 只在确有代码修改和相关检查后再构建。当前整理交接不触发新 IPA、不操作生产或 NAS。
