@@ -31,6 +31,7 @@ struct LibraryRootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @ObservedObject private var playbackSessions = PlaybackSessions.shared
     @State private var previewID: Int?
+    @State private var pendingPreviewID: Int?
     @State private var dwellTask: Task<Void, Never>?
     @State private var previewBounds: [Int: CGRect] = [:]
     @State private var previewViewport = CGSize.zero
@@ -76,6 +77,7 @@ struct LibraryRootView: View {
                 case .tasks: TaskCenterView(api: api)
                 case .management: ManagementView(api: api)
                 case .playlists: PlaylistsView(api: api)
+                case .logs: AppLogsView()
                 }
             }
             .navigationDestination(for: PeachItem.self) { item in
@@ -312,19 +314,49 @@ struct LibraryRootView: View {
     }
 
     private func schedulePreview() {
-        stopPreview()
         guard tab == .library, path.isEmpty, !showFilter, !showWall, !showImmersive,
-              preferences.density == .big, scenePhase == .active, playbackSessions.retained == nil,
-              let id = DwellSelection.candidate(bounds: previewBounds, viewport: CGRect(origin: .zero, size: previewViewport)) else { return }
+              preferences.density == .big, scenePhase == .active, playbackSessions.retained == nil else {
+            stopPreview()
+            return
+        }
+        let viewport = CGRect(origin: .zero, size: previewViewport)
+        let decision = DwellSelection.activeOrNextCandidate(activeID: previewID, bounds: previewBounds, viewport: viewport)
+        if decision.retainedActiveID != nil {
+            dwellTask?.cancel()
+            dwellTask = nil
+            pendingPreviewID = nil
+            return
+        }
+        previewID = nil
+        guard let id = decision.nextCandidateID else {
+            dwellTask?.cancel()
+            dwellTask = nil
+            pendingPreviewID = nil
+            return
+        }
+        if pendingPreviewID == id, dwellTask != nil { return }
+        dwellTask?.cancel()
+        pendingPreviewID = id
         dwellTask = Task {
-            do { try await Task.sleep(for: .seconds(3)) } catch { return }
+            do { try await Task.sleep(for: .seconds(DwellSelection.dwellDurationSeconds)) } catch { return }
             guard !Task.isCancelled else { return }
+            let latestDecision = DwellSelection.activeOrNextCandidate(
+                activeID: nil,
+                bounds: previewBounds,
+                viewport: CGRect(origin: .zero, size: previewViewport)
+            )
+            guard latestDecision.nextCandidateID == id else { return }
             previewID = id
+            pendingPreviewID = nil
+            dwellTask = nil
         }
     }
 
     private func stopPreview() {
-        dwellTask?.cancel(); dwellTask = nil; previewID = nil
+        dwellTask?.cancel()
+        dwellTask = nil
+        pendingPreviewID = nil
+        previewID = nil
     }
 
     @ViewBuilder
@@ -456,4 +488,5 @@ enum AccountRoute: Hashable {
     case tasks
     case management
     case playlists
+    case logs
 }

@@ -94,6 +94,12 @@ struct EntityBrowseView: View {
         } catch let failure {
             guard !Task.isCancelled, kind == requestedKind, query == requestedQuery else { return }
             error = failure.localizedDescription
+            PeachRuntimeLogger.shared.log(
+                "索引加载失败 kind=\(requestedKind.apiKind): \(failure.localizedDescription)",
+                level: .error,
+                category: "browse",
+                source: "EntityBrowseView"
+            )
         }
         loading = false
     }
@@ -231,6 +237,12 @@ struct EntityDetailView: View {
             favorite = shortcuts.favorites.contains { $0.entityID == entity.id }
         } catch let failure {
             self.error = failure.localizedDescription
+            PeachRuntimeLogger.shared.log(
+                "实体收藏切换失败: \(failure.localizedDescription)",
+                level: .error,
+                category: "browse",
+                source: "EntityDetailView"
+            )
         }
     }
 
@@ -257,6 +269,12 @@ struct EntityDetailView: View {
         } catch let failure {
             guard !Task.isCancelled else { return }
             error = failure.localizedDescription
+            PeachRuntimeLogger.shared.log(
+                "实体详情加载失败 kind=\(kind) name=\(name): \(failure.localizedDescription)",
+                level: .error,
+                category: "browse",
+                source: "EntityDetailView"
+            )
         }
         loading = false
     }

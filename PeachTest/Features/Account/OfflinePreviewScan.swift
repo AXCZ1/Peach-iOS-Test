@@ -48,11 +48,13 @@ final class OfflinePreviewScan: ObservableObject {
         guard task == nil, enabled, foreground, let api else { return }
         status = "正在读取全部馆藏…"
         running = true
+        PeachRuntimeLogger.shared.log("离线预览扫描启动", level: .info, category: "offline-preview", source: "OfflinePreviewScan")
         task = Task {
             do {
                 try await scan(api)
                 try Task.checkCancellation()
                 enabled = false
+                PeachRuntimeLogger.shared.log("离线预览扫描完成", level: .info, category: "offline-preview", source: "OfflinePreviewScan")
             } catch {
                 if !Task.isCancelled {
                     if (error as? CocoaError)?.code == .fileWriteOutOfSpace {
@@ -60,6 +62,7 @@ final class OfflinePreviewScan: ObservableObject {
                     } else {
                         status = "扫描未完成：\(error.localizedDescription)"
                     }
+                    PeachRuntimeLogger.shared.log("离线预览扫描失败: \(error.localizedDescription)", level: .error, category: "offline-preview", source: "OfflinePreviewScan")
                     enabled = false
                 }
             }

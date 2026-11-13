@@ -244,9 +244,28 @@ enum PreviewPlayback {
 }
 
 enum DwellSelection {
+    static let minimumVisibleRatio: CGFloat = 0.65
+    static let dwellDurationSeconds: TimeInterval = 1.0
+
+    static func isEligible(frame: CGRect, viewport: CGRect) -> Bool {
+        guard frame.width > 0, frame.height > 0, viewport.width > 0, viewport.height > 0 else { return false }
+        let intersection = frame.intersection(viewport)
+        guard !intersection.isNull else { return false }
+        return intersection.height / min(frame.height, viewport.height) >= minimumVisibleRatio
+    }
+
     static func candidate(bounds: [Int: CGRect], viewport: CGRect) -> Int? {
         bounds.filter { _, frame in
-            frame.width > 0 && frame.height > 0 && frame.intersection(viewport).height / min(frame.height, viewport.height) >= 0.65
+            isEligible(frame: frame, viewport: viewport)
         }.min { abs($0.value.midY - viewport.midY) < abs($1.value.midY - viewport.midY) }?.key
+    }
+
+    /// Retains the active preview while at least 65% of its cover stays visible in the viewport;
+    /// otherwise clears it and returns the next dwell candidate.
+    static func activeOrNextCandidate(activeID: Int?, bounds: [Int: CGRect], viewport: CGRect) -> (retainedActiveID: Int?, nextCandidateID: Int?) {
+        if let activeID, let frame = bounds[activeID], isEligible(frame: frame, viewport: viewport) {
+            return (activeID, nil)
+        }
+        return (nil, candidate(bounds: bounds, viewport: viewport))
     }
 }

@@ -24,11 +24,28 @@ final class PeachImageCache {
                 request.setValue("image/*", forHTTPHeaderField: "Accept")
                 request.timeoutInterval = 30
                 let (data, response) = try await URLSession.shared.data(for: request)
-                guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return nil }
+                let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+                guard (200..<300).contains(status) else {
+                    PeachRuntimeLogger.shared.log(
+                        "图片加载 HTTP 失败 status=\(status) url=\(url.absoluteString)",
+                        level: .warning,
+                        category: "image",
+                        source: "PeachImageCache"
+                    )
+                    return nil
+                }
                 guard !Task.isCancelled, let image = UIImage(data: data) else { return nil }
                 await MediaDiskCache.shared.store(data, for: key)
                 return image
             } catch {
+                if !Task.isCancelled {
+                    PeachRuntimeLogger.shared.log(
+                        "图片加载异常 url=\(url.absoluteString): \(error.localizedDescription)",
+                        level: .warning,
+                        category: "image",
+                        source: "PeachImageCache"
+                    )
+                }
                 return nil
             }
         }

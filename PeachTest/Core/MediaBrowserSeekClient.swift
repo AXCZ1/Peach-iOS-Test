@@ -88,6 +88,12 @@ struct MediaBrowserSeekClient: Sendable {
             let message = status == 401 || status == 403
                 ? "Media Browser 登录被拒绝，请检查地址和密码"
                 : "Media Browser 请求失败（\(status)）"
+            PeachRuntimeLogger.shared.log(
+                "MediaBrowser HTTP \(status) url=\(request.url?.absoluteString ?? "")",
+                level: status >= 500 || status == 0 ? .error : .warning,
+                category: "seek-sync",
+                source: "MediaBrowserSeekClient"
+            )
             throw PeachAPIError(message: message, status: status)
         }
         return data

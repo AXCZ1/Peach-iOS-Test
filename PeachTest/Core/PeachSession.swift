@@ -28,6 +28,7 @@ final class PeachSession: ObservableObject {
         working = true
         defer { working = false }
         error = nil
+        PeachRuntimeLogger.shared.log("开始登录 Peach", level: .info, category: "auth", source: "PeachSession", fields: ["address": address])
         do {
             let base = try PeachAPI.normalizedBaseURL(address)
             let client = PeachAPI(baseURL: base)
@@ -46,6 +47,7 @@ final class PeachSession: ObservableObject {
             finish(base: base, saved: saved)
         } catch {
             self.error = error.localizedDescription
+            PeachRuntimeLogger.shared.log("登录失败: \(error.localizedDescription)", level: .error, category: "auth", source: "PeachSession", fields: ["address": address])
         }
     }
 
@@ -55,16 +57,23 @@ final class PeachSession: ObservableObject {
         defer { working = false }
         error = nil
         retryOrigin = nil
-        guard let base = try? PeachAPI.normalizedBaseURL(address) else { phase = .signedOut; return }
+        guard let base = try? PeachAPI.normalizedBaseURL(address) else {
+            PeachRuntimeLogger.shared.log("恢复会话中止：服务地址无效", level: .warning, category: "auth", source: "PeachSession", fields: ["address": address])
+            phase = .signedOut
+            return
+        }
+        PeachRuntimeLogger.shared.log("尝试恢复登录会话", level: .info, category: "auth", source: "PeachSession", fields: ["origin": PeachAPI.originKey(for: base)])
         let client = PeachAPI(baseURL: base)
         let password: String?
         do { password = try SavedPeachPassword.read(for: base) }
         catch {
             password = nil
             credentialNotice = "无法读取保存的密码：\(error.localizedDescription)"
+            PeachRuntimeLogger.shared.log("读取已保存密码失败: \(error.localizedDescription)", level: .warning, category: "auth", source: "PeachSession")
         }
         let hasCookie = client.hasSession()
         guard hasCookie || password != nil else {
+            PeachRuntimeLogger.shared.log("无有效会话 Cookie 且无已保存凭据，需登录", level: .info, category: "auth", source: "PeachSession")
             error = credentialNotice
             phase = .signedOut
             return
@@ -73,7 +82,9 @@ final class PeachSession: ObservableObject {
             try await Self.withDeadline {
                 if hasCookie {
                     do { try await Self.verify(client); return }
-                    catch let error as PeachAPIError where error.status == 401 && password != nil { }
+                    catch let error as PeachAPIError where error.status == 401 && password != nil {
+                        PeachRuntimeLogger.shared.log("旧会话 Cookie 返回 401，使用已保存凭据重新登录", level: .warning, category: "auth", source: "PeachSession")
+                    }
                 }
                 if let password { try await client.login(password: password) }
                 try await Self.verify(client)
@@ -86,20 +97,24 @@ final class PeachSession: ObservableObject {
             } else if password != nil { retryOrigin = base }
             phase = .signedOut
             self.error = error.localizedDescription
+            PeachRuntimeLogger.shared.log("恢复会话失败: \(error.localizedDescription)", level: .error, category: "auth", source: "PeachSession", fields: ["origin": PeachAPI.originKey(for: base)])
         }
     }
 
     func retryRestore() async {
         guard canRetryRestore, !working else { return }
+        PeachRuntimeLogger.shared.log("用户触发重试恢复会话", level: .info, category: "auth", source: "PeachSession")
         phase = .restoring
         await restore()
     }
 
     func signOut() {
         guard let api else { return }
+        PeachRuntimeLogger.shared.log("用户退出登录", level: .info, category: "auth", source: "PeachSession", fields: ["origin": PeachAPI.originKey(for: api.baseURL)])
         do { try SavedPeachPassword.remove(for: api.baseURL) }
         catch {
             credentialNotice = "无法清除保存的密码：\(error.localizedDescription)"
+            PeachRuntimeLogger.shared.log("清除已保存密码失败: \(error.localizedDescription)", level: .error, category: "auth", source: "PeachSession")
             return
         }
         api.clearSession()
@@ -117,6 +132,7 @@ final class PeachSession: ObservableObject {
         retryOrigin = nil
         api = PeachAPI(baseURL: base, savedPassword: { try SavedPeachPassword.read(for: base) })
         phase = .signedIn
+        PeachRuntimeLogger.shared.log("会话已就绪", level: .info, category: "auth", source: "PeachSession", fields: ["origin": PeachAPI.originKey(for: base), "password_saved": saved ? "true" : "false"])
     }
 
     private nonisolated static func verify(_ client: PeachAPI) async throws {

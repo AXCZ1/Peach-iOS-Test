@@ -31,6 +31,7 @@ final class PlayerPresentation: NSObject, ObservableObject, Identifiable, AVPict
     private var possibleObserver: NSKeyValueObservation?
     private var frameObserver: NSKeyValueObservation?
     private var playerObserver: AnyCancellable?
+    private var notificationTokens: [NotificationToken] = []
     private var restoreCompletion: ((Bool) -> Void)?
     private var visible = false
     private var restoring = false
@@ -40,9 +41,17 @@ final class PlayerPresentation: NSObject, ObservableObject, Identifiable, AVPict
         self.controller = controller ?? PlaybackController(api: api, item: item)
         self.allowsScreenScrubbing = allowsScreenScrubbing
         super.init()
+        let itemID = item.id
         surface.playerLayer.videoGravity = .resizeAspect
         frameObserver = surface.playerLayer.observe(\.isReadyForDisplay, options: [.new]) { [weak controller = self.controller] layer, _ in
-            guard layer.isReadyForDisplay, let player = layer.player else { return }
+            let ready = layer.isReadyForDisplay
+            PeachRuntimeLogger.shared.log(
+                "AVPlayerLayer isReadyForDisplay=\(ready) id=\(itemID)",
+                level: ready ? .info : .debug,
+                category: "player.avplayer",
+                source: "AVPlayerLayer"
+            )
+            guard ready, let player = layer.player else { return }
             Task { @MainActor in controller?.noteDisplayedFrame(for: player) }
         }
         if AVPictureInPictureController.isPictureInPictureSupported() {
@@ -57,15 +66,46 @@ final class PlayerPresentation: NSObject, ObservableObject, Identifiable, AVPict
         playerObserver = self.controller.$player.sink { [weak self] player in
             self?.surface.playerLayer.player = player
         }
+        notificationTokens.append(NotificationToken(NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: nil,
+            queue: .main
+        ) { notification in
+            let rawType = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
+            PeachRuntimeLogger.shared.log(
+                "AVAudioSession 中断事件 type=\(rawType.map(String.init) ?? "unknown") id=\(itemID)",
+                level: .warning,
+                category: "player.audio",
+                source: "AVAudioSession"
+            )
+        }))
+        notificationTokens.append(NotificationToken(NotificationCenter.default.addObserver(
+            forName: AVAudioSession.routeChangeNotification,
+            object: nil,
+            queue: .main
+        ) { notification in
+            let reason = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
+            let outputs = AVAudioSession.sharedInstance().currentRoute.outputs.map(\.portType.rawValue).joined(separator: ",")
+            PeachRuntimeLogger.shared.log(
+                "AVAudioSession 音频路由变化 reason=\(reason.map(String.init) ?? "unknown") outputs=\(outputs) id=\(itemID)",
+                level: .debug,
+                category: "player.audio",
+                source: "AVAudioSession"
+            )
+        }))
     }
     func appear() {
         visible = true; restoring = false
         restoreCompletion?(true); restoreCompletion = nil
         PlaybackSessions.shared.stopPrevious(except: self)
+        PeachRuntimeLogger.shared.log("PlayerPresentation appear id=\(item.id)", level: .info, category: "player.ui", source: "PlayerPresentation")
         do {
             try AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
             try AVAudioSession.sharedInstance().setActive(true)
-        } catch { message = error.localizedDescription }
+        } catch {
+            PeachRuntimeLogger.shared.log("AVAudioSession 激活失败: \(error.localizedDescription)", level: .error, category: "player.audio", source: "PlayerPresentation")
+            message = error.localizedDescription
+        }
     }
     func disappear(keepPlayback: Bool = false) {
         visible = false
@@ -152,14 +192,17 @@ final class PlayerPresentation: NSObject, ObservableObject, Identifiable, AVPict
         if PlaybackSessions.shared.retained === self { PlaybackSessions.shared.retained = nil }
     }
     func pictureInPictureControllerWillStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+        PeachRuntimeLogger.shared.log("PiP 即将启动 id=\(item.id) backend=\(pictureInPictureController === vlcPiP ? "vlc" : "avplayer")", level: .info, category: "player.pip", source: "PlayerPresentation")
         PlaybackSessions.shared.stopPrevious(except: self)
         PlaybackSessions.shared.retained = self
         controller.setPictureInPicture(true)
     }
     func pictureInPictureControllerDidStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+        PeachRuntimeLogger.shared.log("PiP 已启动 id=\(item.id)", level: .info, category: "player.pip", source: "PlayerPresentation")
         onPiPStarted?()
     }
     func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, failedToStartPictureInPictureWithError error: Error) {
+        PeachRuntimeLogger.shared.log("PiP 启动失败 id=\(item.id): \(error.localizedDescription)", level: .error, category: "player.pip", source: "PlayerPresentation")
         if pictureInPictureController === vlcPiP { releaseVLCPiP() }
         controller.setPictureInPicture(false)
         message = error.localizedDescription
@@ -167,11 +210,13 @@ final class PlayerPresentation: NSObject, ObservableObject, Identifiable, AVPict
     }
     func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController,
         restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void) {
+        PeachRuntimeLogger.shared.log("PiP 恢复全屏界面 id=\(item.id) visible=\(visible)", level: .info, category: "player.pip", source: "PlayerPresentation")
         if visible { completionHandler(true); return }
         restoring = true; restoreCompletion = completionHandler
         PlaybackSessions.shared.restored = self
     }
     func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+        PeachRuntimeLogger.shared.log("PiP 已停止 id=\(item.id) visible=\(visible) restoring=\(restoring)", level: .info, category: "player.pip", source: "PlayerPresentation")
         if pictureInPictureController === vlcPiP { releaseVLCPiP() }
         controller.setPictureInPicture(false)
         if !visible && !restoring { controller.stop() }
@@ -229,4 +274,10 @@ struct SessionVideoSurface: UIViewRepresentable {
         drawable.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         host.addSubview(drawable)
     }
+}
+
+private final class NotificationToken: @unchecked Sendable {
+    private let token: NSObjectProtocol
+    init(_ token: NSObjectProtocol) { self.token = token }
+    deinit { NotificationCenter.default.removeObserver(token) }
 }

@@ -50,7 +50,10 @@ final class PlaybackController: ObservableObject {
     private var timeObserver: Any?
     private var itemStatus: NSKeyValueObservation?
     private var timeControlStatus: NSKeyValueObservation?
+    private var waitingReasonObserver: NSKeyValueObservation?
     private var playbackLikelyToKeepUp: NSKeyValueObservation?
+    private var bufferEmptyObserver: NSKeyValueObservation?
+    private var bufferFullObserver: NSKeyValueObservation?
     private var loadedTimeRanges: NSKeyValueObservation?
     private var itemError: NSKeyValueObservation?
     private var stallTask: Task<Void, Never>?
@@ -71,6 +74,10 @@ final class PlaybackController: ObservableObject {
     private var pendingResume: Double?
     private var endObserver: NSObjectProtocol?
     private var failedToEndObserver: NSObjectProtocol?
+    private var accessLogObserver: NSObjectProtocol?
+    private var errorLogObserver: NSObjectProtocol?
+    private var stalledObserver: NSObjectProtocol?
+    private var timeJumpedObserver: NSObjectProtocol?
     private var didEnd = false
 
     init(api: PeachAPI, item: PeachItem, previewOnly: Bool = false, usesDirectAVRateControl: Bool = false,
@@ -79,12 +86,15 @@ final class PlaybackController: ObservableObject {
         self.usesDirectAVRateControl = usesDirectAVRateControl
         self.api = api
         self.item = item
-        self.makeLocalPlayer = makeLocalPlayer ?? Self.defaultLocalPlayer
+        self.isMuted = previewOnly
+        self.makeLocalPlayer = makeLocalPlayer ?? { url, decoder in
+            Self.defaultLocalPlayer(url, decoder, mutedOnly: previewOnly)
+        }
     }
 
-    private static func defaultLocalPlayer(_ url: URL, _ decoder: LocalOriginalDecoder) -> (any LocalOriginalPlayer)? {
+    private static func defaultLocalPlayer(_ url: URL, _ decoder: LocalOriginalDecoder, mutedOnly: Bool = false) -> (any LocalOriginalPlayer)? {
         #if os(iOS) && !SWIFT_PACKAGE
-        VLCOriginalPlayer(url: url, decoder: decoder)
+        VLCOriginalPlayer(url: url, decoder: decoder, mutedOnly: mutedOnly)
         #else
         nil
         #endif
@@ -131,10 +141,23 @@ final class PlaybackController: ObservableObject {
 
     private func prepareStream(for requestedSession: String) async {
         guard canInstallStream(for: requestedSession) else { return }
+        PeachRuntimeLogger.shared.log(
+            "准备播放源 id=\(item.id) name=\(item.name) previewOnly=\(previewOnly)",
+            level: .info,
+            category: "playback",
+            source: "PlaybackController",
+            fields: ["item_id": String(item.id), "preview_only": previewOnly ? "true" : "false"]
+        )
         do {
             try await prepareOriginal(for: requestedSession)
         } catch {
             guard requestedSession == sessionID, !stopped, !Task.isCancelled else { return }
+            PeachRuntimeLogger.shared.log(
+                "准备播放源失败 id=\(item.id): \(error.localizedDescription)",
+                level: .error,
+                category: "playback",
+                source: "PlaybackController"
+            )
             phase = .failed(error.localizedDescription)
         }
     }
@@ -161,7 +184,12 @@ final class PlaybackController: ObservableObject {
                     return
                 }
             } catch where Self.isFormatFailure(error) {
-                // Use the same original stream with the other decoder.
+                PeachRuntimeLogger.shared.log(
+                    "AVFoundation 探测格式不支持 id=\(item.id)，转交 VLC: \(error.localizedDescription)",
+                    level: .warning,
+                    category: "playback",
+                    source: "PlaybackController"
+                )
             }
         }
         guard canInstallStream(for: requestedSession) else { return }
@@ -187,16 +215,35 @@ final class PlaybackController: ObservableObject {
         didDisplayAVFrame = false
         self.player = player
         observe(player, item: playerItem, original: originalURL != nil)
-        player.isMuted = isMuted
+        player.isMuted = previewOnly ? true : isMuted
+        if previewOnly { player.volume = 0 }
+        PeachRuntimeLogger.shared.log(
+            "安装 AVPlayer id=\(item.id) note=\(note) previewOnly=\(previewOnly) muted=\(player.isMuted) url=\(originalURL?.absoluteString ?? "cached")",
+            level: .info,
+            category: "player.avplayer",
+            source: "PlaybackController"
+        )
         if !previewOnly { applyPlaybackIntent() }
         startTicker()
     }
 
     private func installLocalPlayer(for source: URL, decoder: LocalOriginalDecoder = .automatic) {
         guard let backend = makeLocalPlayer(source, decoder) else {
+            PeachRuntimeLogger.shared.log(
+                "本地 VLC 播放器构造失败 id=\(item.id) decoder=\(decoder == .software ? "software" : "auto")",
+                level: .error,
+                category: "player.vlc",
+                source: "PlaybackController"
+            )
             phase = .failed("此设备没有可解码这个原文件的播放器。")
             return
         }
+        PeachRuntimeLogger.shared.log(
+            "安装 VLC 播放器 id=\(item.id) decoder=\(decoder == .software ? "software" : "auto") previewOnly=\(previewOnly)",
+            level: .info,
+            category: "player.vlc",
+            source: "PlaybackController"
+        )
         duration = item.duration ?? duration
         formatNote = decoder == .software ? "原文件直放 · VLC 软件解码" : "原文件直放 · VLC"
         backend.onEvent = { [weak self, weak backend] event in
@@ -204,7 +251,7 @@ final class PlaybackController: ObservableObject {
             self.handleLocalEvent(event, source: source, decoder: decoder)
         }
         localPlayer = backend
-        backend.setMuted(isMuted)
+        backend.setMuted(previewOnly ? true : isMuted)
         if previewOnly {
             if duration > 0 { startPreviewHops() }
             else { backend.setPlayback(true, rate: 1) }
@@ -396,13 +443,22 @@ final class PlaybackController: ObservableObject {
     }
 
     func setMuted(_ muted: Bool) {
-        isMuted = muted
-        player?.isMuted = muted
-        localPlayer?.setMuted(muted)
+        let effective = previewOnly ? true : muted
+        isMuted = effective
+        player?.isMuted = effective
+        if previewOnly { player?.volume = 0 }
+        localPlayer?.setMuted(effective)
     }
 
     func stop() {
         guard !stopped else { return }
+        PeachRuntimeLogger.shared.log(
+            "停止播放器 id=\(item.id) previewOnly=\(previewOnly) pos=\(String(format: "%.2f", currentTime)) backend=\(localPlayer != nil ? "vlc" : (player != nil ? "avplayer" : "none"))",
+            level: .info,
+            category: "playback",
+            source: "PlaybackController",
+            fields: ["item_id": String(item.id)]
+        )
         endBoost()
         isPiPActive = false
         stopPreviewHops()
@@ -490,6 +546,12 @@ final class PlaybackController: ObservableObject {
         case .ended:
             if intent.isActive { finishPlayback() }
         case let .failed(message, canRetryInSoftware):
+            PeachRuntimeLogger.shared.log(
+                "VLC 上报错误 id=\(item.id) retrySW=\(canRetryInSoftware) msg=\(message)",
+                level: .error,
+                category: "player.vlc",
+                source: "PlaybackController"
+            )
             stopPreviewHops()
             flushActivity(force: true)
             localPlayer?.onEvent = nil
@@ -524,12 +586,23 @@ final class PlaybackController: ObservableObject {
     }
 
     private func observe(_ player: AVPlayer, item playerItem: AVPlayerItem, original: Bool) {
+        let itemID = item.id
         itemStatus = playerItem.observe(\.status, options: [.new, .initial]) { [weak self] item, _ in
+            let status = item.status
+            let durationSeconds = item.duration.seconds
+            let errText = item.error.map { Self.formatNSError($0) }
             Task { @MainActor in
                 guard let self, !self.stopped, self.player === player else { return }
-                switch item.status {
+                PeachRuntimeLogger.shared.log(
+                    "AVPlayerItem status=\(Self.avItemStatusName(status)) id=\(itemID) dur=\(durationSeconds.isFinite ? String(format: "%.2f", durationSeconds) : "inf")\(errText.map { " err=\($0)" } ?? "")",
+                    level: status == .failed ? .error : .info,
+                    category: "player.avplayer",
+                    source: "AVPlayerItem",
+                    fields: ["item_id": String(itemID)]
+                )
+                switch status {
                 case .readyToPlay:
-                    let seconds = item.duration.seconds
+                    let seconds = durationSeconds
                     self.duration = seconds.isFinite ? seconds : (self.item.duration ?? 0)
                     if self.phase == .preparing { self.phase = .ready }
                     if self.previewOnly { self.startPreviewHops() }
@@ -542,25 +615,75 @@ final class PlaybackController: ObservableObject {
         }
         itemError = playerItem.observe(\.error, options: [.new]) { [weak self] item, _ in
             guard let error = item.error else { return }
+            let detail = Self.formatNSError(error)
             Task { @MainActor in
                 guard let self, !self.stopped, self.player === player else { return }
+                PeachRuntimeLogger.shared.log(
+                    "AVPlayerItem error id=\(itemID): \(detail)",
+                    level: .error,
+                    category: "player.avplayer",
+                    source: "AVPlayerItem",
+                    fields: ["item_id": String(itemID)]
+                )
                 self.handleFailure(error, player: player, item: item, original: original)
             }
         }
         timeControlStatus = player.observe(\.timeControlStatus, options: [.new, .initial]) { [weak self] player, _ in
+            let tcs = player.timeControlStatus
+            let reason = player.reasonForWaitingToPlay?.rawValue ?? ""
             Task { @MainActor in
                 guard let self, !self.stopped, self.player === player else { return }
-                let playing = player.timeControlStatus == .playing
+                PeachRuntimeLogger.shared.log(
+                    "AVPlayer timeControlStatus=\(Self.timeControlName(tcs)) id=\(itemID)\(reason.isEmpty ? "" : " reason=\(reason)")",
+                    level: .debug,
+                    category: "player.avplayer",
+                    source: "AVPlayer",
+                    fields: ["item_id": String(itemID), "reason": reason]
+                )
+                let playing = tcs == .playing
                 if playing, !self.intent.mayPlay { player.pause() }
                 self.updatePlaying(playing)
                 self.watchForFirstFrame()
             }
         }
+        waitingReasonObserver = player.observe(\.reasonForWaitingToPlay, options: [.new]) { player, _ in
+            guard let reason = player.reasonForWaitingToPlay?.rawValue else { return }
+            PeachRuntimeLogger.shared.log(
+                "AVPlayer 等待播放 id=\(itemID) reason=\(reason)",
+                level: .debug,
+                category: "player.avplayer",
+                source: "AVPlayer",
+                fields: ["item_id": String(itemID), "reason": reason]
+            )
+        }
         playbackLikelyToKeepUp = playerItem.observe(\.isPlaybackLikelyToKeepUp, options: [.new]) { [weak self] item, _ in
-            guard item.isPlaybackLikelyToKeepUp else { return }
+            let keepUp = item.isPlaybackLikelyToKeepUp
+            PeachRuntimeLogger.shared.log(
+                "AVPlayerItem isPlaybackLikelyToKeepUp=\(keepUp) id=\(itemID)",
+                level: .debug,
+                category: "player.avplayer",
+                source: "AVPlayerItem"
+            )
+            guard keepUp else { return }
             Task { @MainActor in
                 if let self, !self.stopped, self.player === player, case .preparing = self.phase, item.status == .readyToPlay { self.phase = .ready }
             }
+        }
+        bufferEmptyObserver = playerItem.observe(\.isPlaybackBufferEmpty, options: [.new]) { item, _ in
+            PeachRuntimeLogger.shared.log(
+                "AVPlayerItem isPlaybackBufferEmpty=\(item.isPlaybackBufferEmpty) id=\(itemID)",
+                level: item.isPlaybackBufferEmpty ? .warning : .debug,
+                category: "player.avplayer",
+                source: "AVPlayerItem"
+            )
+        }
+        bufferFullObserver = playerItem.observe(\.isPlaybackBufferFull, options: [.new]) { item, _ in
+            PeachRuntimeLogger.shared.log(
+                "AVPlayerItem isPlaybackBufferFull=\(item.isPlaybackBufferFull) id=\(itemID)",
+                level: .debug,
+                category: "player.avplayer",
+                source: "AVPlayerItem"
+            )
         }
         loadedTimeRanges = playerItem.observe(\.loadedTimeRanges, options: [.new]) { [weak self] item, _ in
             guard let range = item.loadedTimeRanges.last?.timeRangeValue else { return }
@@ -578,7 +701,72 @@ final class PlaybackController: ObservableObject {
                 self.currentTime = seconds
             }
         }
+        accessLogObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemNewAccessLogEntry, object: playerItem, queue: .main) { notification in
+            guard let event = (notification.object as? AVPlayerItem)?.accessLog()?.events.last else { return }
+            let fields: [String: String] = [
+                "item_id": String(itemID),
+                "uri": event.uri ?? "",
+                "server": event.serverAddress ?? "",
+                "indicated_bps": String(format: "%.0f", event.indicatedBitrate),
+                "observed_bps": String(format: "%.0f", event.observedBitrate),
+                "stalls": String(event.numberOfStalls),
+                "dropped_frames": String(event.numberOfDroppedVideoFrames),
+                "bytes": String(event.numberOfBytesTransferred),
+                "startup_s": String(format: "%.3f", event.startupTime),
+                "watched_s": String(format: "%.2f", event.durationWatched),
+                "transfer_s": String(format: "%.3f", event.transferDuration)
+            ]
+            PeachRuntimeLogger.shared.log(
+                "AVPlayer AccessLog id=\(itemID) bytes=\(event.numberOfBytesTransferred) stalls=\(event.numberOfStalls) dropped=\(event.numberOfDroppedVideoFrames) obsBps=\(Int(event.observedBitrate))",
+                level: .info,
+                category: "player.avplayer.access",
+                source: "AVPlayerItemAccessLog",
+                fields: fields
+            )
+        }
+        errorLogObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemNewErrorLogEntry, object: playerItem, queue: .main) { notification in
+            guard let event = (notification.object as? AVPlayerItem)?.errorLog()?.events.last else { return }
+            let fields: [String: String] = [
+                "item_id": String(itemID),
+                "status_code": String(event.errorStatusCode),
+                "domain": event.errorDomain,
+                "comment": event.errorComment ?? "",
+                "server": event.serverAddress ?? "",
+                "uri": event.uri ?? ""
+            ]
+            PeachRuntimeLogger.shared.log(
+                "AVPlayer ErrorLog id=\(itemID) status=\(event.errorStatusCode) domain=\(event.errorDomain) comment=\(event.errorComment ?? "") uri=\(event.uri ?? "")",
+                level: .error,
+                category: "player.avplayer.error",
+                source: "AVPlayerItemErrorLog",
+                fields: fields
+            )
+        }
+        stalledObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemPlaybackStalled, object: playerItem, queue: .main) { notification in
+            let pos = (notification.object as? AVPlayerItem)?.currentTime().seconds ?? 0
+            PeachRuntimeLogger.shared.log(
+                "AVPlayer 播放停顿 (AVPlayerItemPlaybackStalled) id=\(itemID) pos=\(pos.isFinite ? String(format: "%.2f", pos) : "nan")",
+                level: .warning,
+                category: "player.avplayer",
+                source: "AVPlayerItem"
+            )
+        }
+        timeJumpedObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemTimeJumped, object: playerItem, queue: .main) { notification in
+            let pos = (notification.object as? AVPlayerItem)?.currentTime().seconds ?? 0
+            PeachRuntimeLogger.shared.log(
+                "AVPlayer 时间跳转 (TimeJumped) id=\(itemID) pos=\(pos.isFinite ? String(format: "%.2f", pos) : "nan")",
+                level: .debug,
+                category: "player.avplayer",
+                source: "AVPlayerItem"
+            )
+        }
         endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: playerItem, queue: .main) { [weak self] _ in
+            PeachRuntimeLogger.shared.log(
+                "AVPlayer 播放到结尾 id=\(itemID)",
+                level: .info,
+                category: "player.avplayer",
+                source: "AVPlayerItem"
+            )
             Task { @MainActor in
                 guard let self, !self.stopped, self.player === player, self.intent.isActive else { return }
                 self.finishPlayback()
@@ -587,6 +775,12 @@ final class PlaybackController: ObservableObject {
         if original {
             failedToEndObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemFailedToPlayToEndTime, object: playerItem, queue: .main) { [weak self] notification in
                 let error = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? NSError
+                PeachRuntimeLogger.shared.log(
+                    "AVPlayer FailedToPlayToEndTime id=\(itemID): \(error.map { Self.formatNSError($0) } ?? "unknown")",
+                    level: .error,
+                    category: "player.avplayer",
+                    source: "AVPlayerItem"
+                )
                 Task { @MainActor in
                     guard let self, !self.stopped, self.player === player else { return }
                     self.handleFailure(error ?? playerItem.error, player: player, item: playerItem, original: true)
@@ -596,15 +790,34 @@ final class PlaybackController: ObservableObject {
         stallTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(45))
             guard let self, !Task.isCancelled, !self.stopped, self.player === player, self.phase == .preparing else { return }
+            PeachRuntimeLogger.shared.log(
+                "AVPlayer 起播 45 秒超时 id=\(itemID)",
+                level: .error,
+                category: "player.avplayer",
+                source: "PlaybackController"
+            )
             self.phase = .failed("播放源长时间没有响应。请检查网络与 Peach 服务地址。")
         }
     }
 
     private func handleFailure(_ error: Error?, player: AVPlayer, item: AVPlayerItem, original: Bool) {
+        let errorSummary = error.map { Self.formatNSError($0) } ?? "unknown"
         guard original, let source = avOriginalURL, Self.isFormatFailure(error), !Self.hasHTTPFailure(item) else {
+            PeachRuntimeLogger.shared.log(
+                "AVPlayer 终止失败 id=\(self.item.id) original=\(original): \(errorSummary)",
+                level: .error,
+                category: "player.avplayer",
+                source: "PlaybackController"
+            )
             phase = .failed(Self.describe(error))
             return
         }
+        PeachRuntimeLogger.shared.log(
+            "AVPlayer 格式解码失败，回退 VLC id=\(self.item.id): \(errorSummary)",
+            level: .warning,
+            category: "player.avplayer",
+            source: "PlaybackController"
+        )
         switchToLocalPlayer(source: source, replacing: player)
     }
 
@@ -722,7 +935,10 @@ final class PlaybackController: ObservableObject {
         timeObserver = nil
         itemStatus = nil
         timeControlStatus = nil
+        waitingReasonObserver = nil
         playbackLikelyToKeepUp = nil
+        bufferEmptyObserver = nil
+        bufferFullObserver = nil
         loadedTimeRanges = nil
         itemError = nil
         stallTask?.cancel()
@@ -735,6 +951,42 @@ final class PlaybackController: ObservableObject {
         endObserver = nil
         if let failedToEndObserver { NotificationCenter.default.removeObserver(failedToEndObserver) }
         failedToEndObserver = nil
+        if let accessLogObserver { NotificationCenter.default.removeObserver(accessLogObserver) }
+        accessLogObserver = nil
+        if let errorLogObserver { NotificationCenter.default.removeObserver(errorLogObserver) }
+        errorLogObserver = nil
+        if let stalledObserver { NotificationCenter.default.removeObserver(stalledObserver) }
+        stalledObserver = nil
+        if let timeJumpedObserver { NotificationCenter.default.removeObserver(timeJumpedObserver) }
+        timeJumpedObserver = nil
+    }
+
+    nonisolated private static func avItemStatusName(_ status: AVPlayerItem.Status) -> String {
+        switch status {
+        case .unknown: return "unknown"
+        case .readyToPlay: return "readyToPlay"
+        case .failed: return "failed"
+        @unknown default: return "other(\(status.rawValue))"
+        }
+    }
+
+    nonisolated private static func timeControlName(_ status: AVPlayer.TimeControlStatus) -> String {
+        switch status {
+        case .paused: return "paused"
+        case .waitingToPlayAtSpecifiedRate: return "waiting"
+        case .playing: return "playing"
+        @unknown default: return "other(\(status.rawValue))"
+        }
+    }
+
+    nonisolated private static func formatNSError(_ error: Error) -> String {
+        var current: NSError? = error as NSError
+        var parts: [String] = []
+        while let err = current, parts.count < 4 {
+            parts.append("\(err.domain)#\(err.code)(\(err.localizedDescription))")
+            current = err.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+        return parts.joined(separator: " -> ")
     }
 
     private static func describe(_ error: Error?) -> String {

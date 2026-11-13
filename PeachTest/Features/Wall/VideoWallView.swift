@@ -188,14 +188,26 @@ struct VideoWallView: View {
             items.append(contentsOf: page.items.filter { ($0.medium ?? "video") == "video" && $0.hasCover && !($0.coverKey.isEmpty && $0.displayNumber.isEmpty) })
             refreshTiles()
             if items.isEmpty && !hasMore { error = "当前筛选下没有带封面的影片" }
-        } catch { self.error = error.localizedDescription; toast = error.localizedDescription }
+        } catch {
+            self.error = error.localizedDescription
+            toast = error.localizedDescription
+            PeachRuntimeLogger.shared.log(
+                "视频墙分页加载失败 offset=\(offset): \(error.localizedDescription)",
+                level: .error,
+                category: "wall",
+                source: "VideoWallView"
+            )
+        }
     }
     private func toggleLater(_ item: PeachItem) async {
         do {
             let value = try await api.toggleWatchLater(id: item.id)
             if let index = items.firstIndex(where: { $0.id == item.id }) { items[index] = PeachItem(copying: item, watchLater: value) }
             toast = value ? "已加入稍后看" : "已移出稍后看"
-        } catch { toast = error.localizedDescription }
+        } catch {
+            toast = error.localizedDescription
+            PeachRuntimeLogger.shared.log("稍后看操作失败 id=\(item.id): \(error.localizedDescription)", level: .warning, category: "wall", source: "VideoWallView")
+        }
         try? await Task.sleep(for: .seconds(2)); toast = nil
     }
 }

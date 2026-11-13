@@ -34,11 +34,13 @@ final class PlaybackOrientation: ObservableObject {
         previous = orientation == .landscapeLeft ? .landscapeLeft : orientation == .landscapeRight ? .landscapeRight : .portrait
         Self.owner = self
         landscape = true
+        PeachRuntimeLogger.shared.log("请求切换横屏播放", level: .info, category: "orientation", source: "PlaybackOrientation")
         request(orientation.isLandscape ? previous : .landscapeRight, in: scene) { [weak self] error in
             guard let self, Self.owner === self else { return }
             Self.owner = nil
             self.landscape = false
             self.updateControllers(in: scene)
+            PeachRuntimeLogger.shared.log("切换横屏失败: \(error.localizedDescription)", level: .error, category: "orientation", source: "PlaybackOrientation")
             onError(error.localizedDescription)
         }
     }
@@ -49,7 +51,11 @@ final class PlaybackOrientation: ObservableObject {
         guard Self.owner === self, let scene else { return }
         Self.owner = nil
         landscape = false
-        request(mask, in: scene) { onError($0.localizedDescription) }
+        PeachRuntimeLogger.shared.log("恢复页面方向 mask=\(mask.rawValue)", level: .debug, category: "orientation", source: "PlaybackOrientation")
+        request(mask, in: scene) { error in
+            PeachRuntimeLogger.shared.log("恢复页面方向失败: \(error.localizedDescription)", level: .warning, category: "orientation", source: "PlaybackOrientation")
+            onError(error.localizedDescription)
+        }
     }
 
     private func request(_ mask: UIInterfaceOrientationMask, in scene: UIWindowScene, onError: @escaping (Error) -> Void) {

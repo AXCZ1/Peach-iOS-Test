@@ -27,8 +27,10 @@ final class ItemDetailModel: ObservableObject {
         if item == nil { state = .loading }
         do {
             state = .loaded(try await api.item(id: id))
+            PeachRuntimeLogger.shared.log("作品详情加载完成 id=\(id)", level: .debug, category: "detail", source: "ItemDetailModel")
         } catch {
             state = .failed(error.localizedDescription)
+            PeachRuntimeLogger.shared.log("作品详情加载失败 id=\(id): \(error.localizedDescription)", level: .error, category: "detail", source: "ItemDetailModel")
         }
     }
 
@@ -38,7 +40,7 @@ final class ItemDetailModel: ObservableObject {
         do {
             state = .loaded(try await api.item(id: id))
         } catch {
-            // Keep the last confirmed item; the caller already reports the write failure.
+            PeachRuntimeLogger.shared.log("作品详情刷新失败 id=\(id): \(error.localizedDescription)", level: .warning, category: "detail", source: "ItemDetailModel")
         }
     }
 

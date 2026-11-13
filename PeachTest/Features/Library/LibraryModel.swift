@@ -66,9 +66,21 @@ final class LibraryModel: ObservableObject {
             hasMore = page.hasMore ?? (items.count < total)
             self.facets = facets
             state = .loaded
+            PeachRuntimeLogger.shared.log(
+                "媒体库加载完成 count=\(items.count) total=\(total) hasMore=\(hasMore)",
+                level: .debug,
+                category: "library",
+                source: "LibraryModel"
+            )
         } catch {
             guard current == generation else { return }
             state = .failed(error.localizedDescription)
+            PeachRuntimeLogger.shared.log(
+                "媒体库加载失败: \(error.localizedDescription)",
+                level: .error,
+                category: "library",
+                source: "LibraryModel"
+            )
         }
     }
 
@@ -84,7 +96,12 @@ final class LibraryModel: ObservableObject {
             items.append(contentsOf: page.items.filter { !known.contains($0.id) })
             hasMore = page.hasMore ?? (items.count < total)
         } catch {
-            // Keep the visible page; the user can retry by scrolling.
+            PeachRuntimeLogger.shared.log(
+                "媒体库分页加载失败: \(error.localizedDescription)",
+                level: .warning,
+                category: "library",
+                source: "LibraryModel"
+            )
         }
     }
 

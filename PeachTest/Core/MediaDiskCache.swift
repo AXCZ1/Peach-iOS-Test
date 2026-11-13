@@ -66,7 +66,12 @@ actor MediaDiskCache {
                 trim(directory, to: limit * 9 / 10, keeping: path)
             }
         } catch {
-            // Cache storage can be reclaimed by the system; the fetched media remains usable.
+            PeachRuntimeLogger.shared.log(
+                "磁盘缓存写入失败 \(key.kind.rawValue): \(error.localizedDescription)",
+                level: .warning,
+                category: "cache",
+                source: "MediaDiskCache"
+            )
         }
     }
 

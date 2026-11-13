@@ -42,8 +42,31 @@ final class WallPreviewTests: XCTestCase {
     }
     func testDwellChoosesOneVisibleCardAndRejectsSliver() {
         let viewport = CGRect(x: 0, y: 0, width: 400, height: 500)
+        XCTAssertEqual(DwellSelection.dwellDurationSeconds, 1.0, accuracy: 0.0001)
         XCTAssertEqual(DwellSelection.candidate(bounds: [1:CGRect(x: 0, y: -400, width: 400, height: 500), 2:CGRect(x: 0, y: 100, width: 400, height: 500)], viewport: viewport), 2)
         XCTAssertNil(DwellSelection.candidate(bounds: [1:CGRect(x: 0, y: 490, width: 400, height: 500)], viewport: viewport))
+    }
+
+    func testDwellRetainsActivePreviewAtOrAboveSixtyFivePercent() {
+        let viewport = CGRect(x: 0, y: 0, width: 400, height: 800)
+        let almostGoneActive = CGRect(x: 0, y: -140, width: 360, height: 400) // 260 / 400 = 65.0%
+        let centeredSecond = CGRect(x: 0, y: 200, width: 360, height: 400)   // 100% centered
+        let retained = DwellSelection.activeOrNextCandidate(
+            activeID: 1,
+            bounds: [1: almostGoneActive, 2: centeredSecond],
+            viewport: viewport
+        )
+        XCTAssertEqual(retained.retainedActiveID, 1)
+        XCTAssertNil(retained.nextCandidateID)
+
+        let droppedBelow65 = CGRect(x: 0, y: -141, width: 360, height: 400) // 259 / 400 = 64.75%
+        let switched = DwellSelection.activeOrNextCandidate(
+            activeID: 1,
+            bounds: [1: droppedBelow65, 2: centeredSecond],
+            viewport: viewport
+        )
+        XCTAssertNil(switched.retainedActiveID)
+        XCTAssertEqual(switched.nextCandidateID, 2)
     }
     func testThirtyFramesUseFractionalIntervalAndPartialSheet() throws {
         let data = Data("{\"frames\":30,\"interval\":298.2791277667,\"columns\":10,\"rows\":10,\"source\":\"peach\",\"timestamps\":[89.48]}".utf8)

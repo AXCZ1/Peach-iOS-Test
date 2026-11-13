@@ -25,6 +25,9 @@ struct AccountHubView: View {
                 NavigationLink(value: AccountRoute.management) {
                     Label("数据管理与配置", systemImage: "wrench.and.screwdriver")
                 }
+                NavigationLink(value: AccountRoute.logs) {
+                    Label("日志", systemImage: "doc.text.magnifyingglass")
+                }
             }
             Section("连接") {
                 LabeledContent("服务", value: session.address)

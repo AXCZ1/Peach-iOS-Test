@@ -206,6 +206,12 @@ struct ImmersiveView: View {
             return
         } catch let failure {
             loadMoreError = failure.localizedDescription
+            PeachRuntimeLogger.shared.log(
+                "沉浸模式补充列表失败: \(failure.localizedDescription)",
+                level: .error,
+                category: "immersive",
+                source: "ImmersiveView"
+            )
         }
     }
 
@@ -229,6 +235,12 @@ struct ImmersiveView: View {
             return
         } catch let failure {
             error = failure.localizedDescription
+            PeachRuntimeLogger.shared.log(
+                "沉浸模式初始化加载失败: \(failure.localizedDescription)",
+                level: .error,
+                category: "immersive",
+                source: "ImmersiveView"
+            )
         }
     }
 

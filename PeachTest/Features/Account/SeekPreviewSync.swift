@@ -88,9 +88,11 @@ final class SeekPreviewSync: ObservableObject {
             while foreground && !Task.isCancelled {
                 do {
                     try await runWithBackgroundTime(api, source: source)
+                    PeachRuntimeLogger.shared.log("Seek 预览图库同步轮次完成 origin=\(source.origin.absoluteString)", level: .info, category: "seek-sync", source: "SeekPreviewSync")
                 } catch {
                     try Task.checkCancellation()
                     status = error.localizedDescription
+                    PeachRuntimeLogger.shared.log("Seek 预览图库同步失败: \(error.localizedDescription)", level: .error, category: "seek-sync", source: "SeekPreviewSync")
                     if let error = error as? PeachAPIError, error.status == 401 || error.status == 403 { return }
                 }
                 guard foreground else { return }

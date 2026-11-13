@@ -67,8 +67,9 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
         VLCLibrary.shared().loggers = [logSink]
     }()
 
-    init(url: URL, decoder: LocalOriginalDecoder, confirmsSeekFrames: Bool = false) {
+    init(url: URL, decoder: LocalOriginalDecoder, confirmsSeekFrames: Bool = false, mutedOnly: Bool = false) {
         self.confirmsSeekFrames = confirmsSeekFrames
+        self.muted = mutedOnly
         _ = Self.installLogSink
         view.backgroundColor = .black
         view.clipsToBounds = true
@@ -76,6 +77,9 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
         let player = VLCMediaPlayer()
         player.drawable = view
         let media = VLCMedia(url: url)
+        if mutedOnly {
+            media?.addOption(":no-audio")
+        }
         if confirmsSeekFrames {
             media?.addOption(":input-fast-seek")
             media?.addOption(":network-caching=300")
@@ -83,6 +87,12 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
         if decoder == .software { media?.addOption(":no-hw-dec") }
         player.media = media
         self.player = player
+        PeachRuntimeLogger.shared.log(
+            "VLC 初始化 decoder=\(decoder == .software ? "software" : "auto") confirmsSeek=\(confirmsSeekFrames) mutedOnly=\(mutedOnly) url=\(url.absoluteString)",
+            level: .info,
+            category: "player.vlc",
+            source: "VLCOriginalPlayer"
+        )
     }
 
     var reportingPosition: Double? {
@@ -111,6 +121,14 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
         if confirmsSeekFrames, shouldPlay, playbackRequested, rateChanged, hasFrame, pendingSeek == nil {
             flushDisplayLayer(onlyWhenFailed: false)
         }
+        if rateChanged {
+            PeachRuntimeLogger.shared.log(
+                "VLC 速率变更 rate=\(rate) shouldPlay=\(shouldPlay)",
+                level: .debug,
+                category: "player.vlc",
+                source: "VLCOriginalPlayer"
+            )
+        }
         if shouldPlay, !playbackRequested {
             playbackRequested = true
             if didEnd {
@@ -120,13 +138,26 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
             }
             if !hasFrame { firstFrameDeadline = ContinuousClock.now + .seconds(15) }
             applyMute(to: player)
+            PeachRuntimeLogger.shared.log(
+                "VLC 请求起播/恢复 rate=\(rate) hasFrame=\(hasFrame)",
+                level: .info,
+                category: "player.vlc",
+                source: "VLCOriginalPlayer"
+            )
             let started = ContinuousClock.now
             player.play()
+            applyMute(to: player)
             if confirmsSeekFrames { playCallMilliseconds = elapsedMilliseconds(since: started) }
         } else if !shouldPlay, playbackRequested {
             playbackRequested = false
             firstFrameDeadline = nil
             player.pause()
+            PeachRuntimeLogger.shared.log(
+                "VLC 暂停 pos=\(String(format: "%.2f", position))",
+                level: .debug,
+                category: "player.vlc",
+                source: "VLCOriginalPlayer"
+            )
             onEvent?(.sample(position: reportingPosition, duration: duration(of: player), playing: false, hasFrame: hasFrame))
         }
         updatePulse()
@@ -144,6 +175,12 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
         }
         cancelSeek()
         pendingSeek = Seek(target: Int32((time * 1_000).rounded()), completion: completion)
+        PeachRuntimeLogger.shared.log(
+            "VLC 请求跳转 target=\(String(format: "%.2f", time))s",
+            level: .debug,
+            category: "player.vlc",
+            source: "VLCOriginalPlayer"
+        )
         applyMute(to: player)
         updatePulse()
     }
@@ -159,6 +196,12 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
         player.audio?.isMuted = true
         player.pause()
         player.drawable = nil
+        PeachRuntimeLogger.shared.log(
+            "VLC stop() 移交后台释放队列 pos=\(String(format: "%.2f", position)) hasFrame=\(hasFrame)",
+            level: .info,
+            category: "player.vlc",
+            source: "VLCOriginalPlayer"
+        )
         let retirement = VLCPlayerRetirement(player)
         retirement.stopAndReleaseWhenStopped()
     }
@@ -251,6 +294,12 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
         }
         hasFrame = true
         firstFrameDeadline = nil
+        PeachRuntimeLogger.shared.log(
+            "VLC 首帧出画 facts=\(playbackFacts())",
+            level: .info,
+            category: "player.vlc",
+            source: "VLCOriginalPlayer"
+        )
     }
 
     private func updateSeek(on player: VLCMediaPlayer, displayedPictures: UInt64?, canRetryInSoftware: Bool) {
@@ -276,17 +325,35 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
         let displayFailed = confirmsSeekFrames && pictureInPictureLayer?.status == .failed
         if !displayFailed && seek.confirmation?.observe(position: position, displayedPictures: displayedPictures, playing: playbackRequested) == true {
             pendingSeek = nil
+            PeachRuntimeLogger.shared.log(
+                "VLC 跳转确认完成 targetMs=\(seek.target) pos=\(String(format: "%.2f", position))s",
+                level: .debug,
+                category: "player.vlc",
+                source: "VLCOriginalPlayer"
+            )
             seek.completion(position)
         } else if let deadline = seek.deadline, ContinuousClock.now >= deadline {
             let hasNewFrames = (displayedPictures ?? 0) > (picturesAtSeek ?? 0)
             let nearTarget = abs(position - Double(seek.target) / 1_000) < 30
             if !displayFailed && hasNewFrames && (hasFrame || nearTarget) {
                 pendingSeek = nil
+                PeachRuntimeLogger.shared.log(
+                    "VLC 跳转超时兜底放行 targetMs=\(seek.target) pos=\(String(format: "%.2f", position))s",
+                    level: .warning,
+                    category: "player.vlc",
+                    source: "VLCOriginalPlayer"
+                )
                 seek.completion(position)
             } else if confirmsSeekFrames && playbackRequested {
                 fail("未能跳转到指定位置。", canRetryInSoftware: canRetryInSoftware)
             } else {
                 pendingSeek = nil
+                PeachRuntimeLogger.shared.log(
+                    "VLC 非播放状态跳转超时 targetMs=\(seek.target) facts=\(playbackFacts())",
+                    level: .warning,
+                    category: "player.vlc",
+                    source: "VLCOriginalPlayer"
+                )
                 seek.completion(nil)
             }
         } else {
@@ -317,6 +384,12 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
         guard confirmsSeekFrames, let layer = pictureInPictureLayer else { return }
         if layer.status == .failed {
             lastDisplayFailureCode = (layer.error as NSError?)?.code ?? lastDisplayFailureCode
+            PeachRuntimeLogger.shared.log(
+                "VLC AVSampleBufferDisplayLayer 状态 failed code=\(lastDisplayFailureCode ?? -1) err=\(layer.error?.localizedDescription ?? "unknown")，执行 flush()",
+                level: .warning,
+                category: "player.vlc",
+                source: "VLCOriginalPlayer"
+            )
         } else if onlyWhenFailed {
             return
         }
@@ -375,6 +448,12 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
 
     private func fail(_ message: String, canRetryInSoftware: Bool) {
         let reported = confirmsSeekFrames ? message + "\n" + playbackFacts() : message
+        PeachRuntimeLogger.shared.log(
+            "VLC 播放失败 retrySW=\(canRetryInSoftware): \(reported)",
+            level: .error,
+            category: "player.vlc",
+            source: "VLCOriginalPlayer"
+        )
         if confirmsSeekFrames, pendingSeek != nil { hasFrame = false }
         stop()
         onEvent?(.failed(reported, canRetryInSoftware: canRetryInSoftware))
@@ -472,6 +551,23 @@ final class VLCOriginalFrameDecoder: NSObject, VLCMediaThumbnailerDelegate {
         self.thumbnailer = nil
         let pending = continuation
         continuation = nil
+        switch result {
+        case .success(let image):
+            PeachRuntimeLogger.shared.log(
+                "VLC 缩略图取帧成功 \(image.width)x\(image.height)",
+                level: .debug,
+                category: "player.vlc",
+                source: "VLCOriginalFrameDecoder"
+            )
+        case .failure(let error) where !(error is CancellationError):
+            PeachRuntimeLogger.shared.log(
+                "VLC 缩略图取帧失败: \(error.localizedDescription)",
+                level: .warning,
+                category: "player.vlc",
+                source: "VLCOriginalFrameDecoder"
+            )
+        default: break
+        }
         pending?.resume(with: result)
     }
 }
@@ -521,7 +617,14 @@ private final class VLCPlayerRetirement: @unchecked Sendable {
 
     private func finishOnTimeout() {
         guard !didFinish else { return }
-        finish(clearMedia: player?.state == .stopped)
+        let stoppedNow = player?.state == .stopped
+        PeachRuntimeLogger.shared.log(
+            "VLC 后台释放超时 5s state=\(player?.state.rawValue ?? -1) clearMedia=\(stoppedNow)",
+            level: .warning,
+            category: "player.vlc",
+            source: "VLCPlayerRetirement"
+        )
+        finish(clearMedia: stoppedNow)
     }
 
     private func finish(clearMedia: Bool) {
@@ -537,12 +640,47 @@ private final class VLCPlayerRetirement: @unchecked Sendable {
         }
         player = nil
         retainedSelf = nil
+        PeachRuntimeLogger.shared.log(
+            "VLC 后台释放完成 clearMedia=\(clearMedia)",
+            level: .debug,
+            category: "player.vlc",
+            source: "VLCPlayerRetirement"
+        )
     }
 }
 
-/// Do not let VLC write signed playback URLs to its default stderr logger.
+/// Forwards all VLCKit log levels into PeachRuntimeLogger without writing signed playback URLs to stderr.
 private final class VLCPrivateLogSink: NSObject, VLCLogging {
     var level: VLCLogLevel = VLCLogLevel(rawValue: 3)!
-    func handleMessage(_ message: String, logLevel level: VLCLogLevel, context: VLCLogContext?) {}
+
+    func handleMessage(_ message: String, logLevel level: VLCLogLevel, context: VLCLogContext?) {
+        let mappedLevel: PeachLogLevel
+        switch level.rawValue {
+        case 0: mappedLevel = .error
+        case 1: mappedLevel = .warning
+        case 2: mappedLevel = .info
+        default: mappedLevel = .debug
+        }
+        var fields: [String: String] = ["vlc_level": String(level.rawValue)]
+        if let context {
+            fields["module"] = context.module
+            fields["object_type"] = context.objectType
+            fields["object_id"] = String(context.objectId)
+            fields["thread_id"] = String(context.threadId)
+            if let header = context.header, !header.isEmpty { fields["header"] = header }
+            if let file = context.file, !file.isEmpty {
+                fields["file"] = "\(file):\(context.line)"
+            }
+            if let fn = context.function, !fn.isEmpty { fields["function"] = fn }
+        }
+        let category = context.map { "vlc.\($0.module)" } ?? "vlc"
+        PeachRuntimeLogger.shared.log(
+            message,
+            level: mappedLevel,
+            category: category,
+            source: context?.objectType ?? "VLCKit",
+            fields: fields
+        )
+    }
 }
 #endif

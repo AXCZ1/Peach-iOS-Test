@@ -386,6 +386,18 @@ final class OriginalPlaybackTests: XCTestCase {
         XCTAssertNil(PlayerMemory.shared.position(for: controller.item.id))
     }
 
+    @MainActor
+    func testPreviewControllerRemainsMutedEvenIfUnmuteRequested() throws {
+        let local = RecordingLocalPlayer()
+        let api = PeachAPI(baseURL: URL(string: "http://127.0.0.1:8900")!)
+        let item = try JSONDecoder().decode(PeachItem.self, from: Data("{\"id\":42009,\"name\":\"preview.mp4\",\"duration\":60}".utf8))
+        let controller = PlaybackController(api: api, item: item, previewOnly: true, makeLocalPlayer: { _, _ in local })
+        XCTAssertTrue(controller.isMuted)
+        controller.setMuted(false)
+        XCTAssertTrue(controller.isMuted)
+        controller.stop()
+    }
+
     func testVLCSeekConfirmationAcceptsMKVKeyframeLandingWithinJumpRange() {
         var startupSeek = VLCSeekConfirmation(target: 120_000, displayedBeforeJump: 0)
         XCTAssertFalse(startupSeek.observe(position: 0.2, displayedPictures: 1, playing: true))
