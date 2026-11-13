@@ -47,7 +47,6 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
     private var position = 0.0
     private var firstFrameDeadline: ContinuousClock.Instant?
     private var pulse: Task<Void, Never>?
-    private var rateSyncTask: Task<Void, Never>?
     private var pendingSeek: Seek?
     private let confirmsSeekFrames: Bool
     private var playCallMilliseconds: Int?
@@ -63,7 +62,6 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
         var deadline: ContinuousClock.Instant?
     }
 
-    private static let retirementQueue = DispatchQueue(label: "Peach.VLC.retirement", qos: .utility)
     private static let logSink = VLCPrivateLogSink()
     fileprivate static let installLogSink: Void = {
         VLCLibrary.shared().loggers = [logSink]
@@ -111,10 +109,7 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
         let rateChanged = abs(player.rate - rate) > 0.01
         player.rate = rate
         if confirmsSeekFrames, shouldPlay, playbackRequested, rateChanged, hasFrame, pendingSeek == nil {
-            scheduleRateTimingSync()
-        } else if !shouldPlay {
-            rateSyncTask?.cancel()
-            rateSyncTask = nil
+            flushDisplayLayer(onlyWhenFailed: false)
         }
         if shouldPlay, !playbackRequested {
             playbackRequested = true
@@ -147,8 +142,6 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
             completion(nil)
             return
         }
-        rateSyncTask?.cancel()
-        rateSyncTask = nil
         cancelSeek()
         pendingSeek = Seek(target: Int32((time * 1_000).rounded()), completion: completion)
         applyMute(to: player)
@@ -158,8 +151,6 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
     func stop() {
         pulse?.cancel()
         pulse = nil
-        rateSyncTask?.cancel()
-        rateSyncTask = nil
         cancelSeek()
         firstFrameDeadline = nil
         playbackRequested = false
@@ -169,7 +160,7 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
         player.pause()
         player.drawable = nil
         let retirement = VLCPlayerRetirement(player)
-        Self.retirementQueue.async { retirement.stopAndReleaseWhenStopped() }
+        retirement.stopAndReleaseWhenStopped()
     }
 
     private func updatePulse() {
@@ -332,27 +323,6 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
         layer.flush()
     }
 
-    private func scheduleRateTimingSync() {
-        rateSyncTask?.cancel()
-        flushDisplayLayer(onlyWhenFailed: false)
-        rateSyncTask = Task { [weak self] in
-            // VLC CoreAudio only reports audio timing every 1000 ms after queued
-            // old-rate PCM drains. Posting an unknown route change resets the
-            // report interval without restarting the AudioUnit, updating the clock
-            // as soon as the 300 ms queue clears.
-            for delayMs in [180, 160] {
-                do { try await Task.sleep(for: .milliseconds(delayMs)) } catch { return }
-                guard let self, self.player != nil, self.playbackRequested, self.pendingSeek == nil else { return }
-                NotificationCenter.default.post(
-                    name: AVAudioSession.routeChangeNotification,
-                    object: AVAudioSession.sharedInstance(),
-                    userInfo: [AVAudioSessionRouteChangeReasonKey: AVAudioSession.RouteChangeReason.unknown.rawValue]
-                )
-                self.flushDisplayLayer(onlyWhenFailed: false)
-            }
-        }
-    }
-
     private func elapsedMilliseconds(since start: ContinuousClock.Instant) -> Int {
         let parts = start.duration(to: .now).components
         return Int(parts.seconds) * 1_000 + Int(parts.attoseconds / 1_000_000_000_000_000)
@@ -506,41 +476,67 @@ final class VLCOriginalFrameDecoder: NSObject, VLCMediaThumbnailerDelegate {
     }
 }
 
-/// VLCKit stops asynchronously; keep the decoder alive until it finishes.
+/// VLCKit stops asynchronously; retire and release each player off the main thread.
 private final class VLCPlayerRetirement: @unchecked Sendable {
-    private let player: VLCMediaPlayer
+    private let queue = DispatchQueue(label: "Peach.VLC.retirement", qos: .utility)
+    private var player: VLCMediaPlayer?
     private var stateObserver: NSObjectProtocol?
+    private var timeoutItem: DispatchWorkItem?
+    private var retainedSelf: VLCPlayerRetirement?
     private var didFinish = false
 
     init(_ player: VLCMediaPlayer) { self.player = player }
 
     func stopAndReleaseWhenStopped() {
-        DispatchQueue.main.async { [self] in
-            guard player.state != .stopped, player.state != .error else {
-                releaseResources()
+        queue.async { [self] in
+            guard let player else {
+                finish(clearMedia: false)
                 return
             }
+            retainedSelf = self
             stateObserver = NotificationCenter.default.addObserver(
                 forName: VLCMediaPlayer.stateChangedNotification,
-                object: player, queue: .main
-            ) { [self] _ in
-                if player.state == .stopped || player.state == .error {
-                    releaseResources()
-                }
+                object: player,
+                queue: nil
+            ) { [weak self] _ in
+                guard let self else { return }
+                self.queue.async { [weak self] in self?.finishIfStopped() }
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(5)) { [self] in
-                releaseResources()
+            player.stop()
+            finishIfStopped()
+            guard !didFinish else { return }
+            let timeout = DispatchWorkItem { [weak self] in
+                self?.finishOnTimeout()
             }
+            timeoutItem = timeout
+            queue.asyncAfter(deadline: .now() + .seconds(5), execute: timeout)
         }
-        player.stop()
     }
 
-    private func releaseResources() {
+    private func finishIfStopped() {
+        guard !didFinish, let player else { return }
+        guard player.state == .stopped else { return }
+        finish(clearMedia: true)
+    }
+
+    private func finishOnTimeout() {
         guard !didFinish else { return }
+        finish(clearMedia: player?.state == .stopped)
+    }
+
+    private func finish(clearMedia: Bool) {
         didFinish = true
-        if let stateObserver { NotificationCenter.default.removeObserver(stateObserver) }
-        stateObserver = nil
-        player.media = nil
+        timeoutItem?.cancel()
+        timeoutItem = nil
+        if let stateObserver {
+            NotificationCenter.default.removeObserver(stateObserver)
+            self.stateObserver = nil
+        }
+        if clearMedia {
+            player?.media = nil
+        }
+        player = nil
+        retainedSelf = nil
     }
 }
 
