@@ -304,6 +304,9 @@ struct PreviewFilmstrip: View {
         guard !misses.isEmpty, !Task.isCancelled else { return }
 
         do {
+            // Defer remote keyframe extraction briefly so tapping Play right after
+            // entering or leaving the player does not contend with thumbnail parsing.
+            try await Task.sleep(for: .milliseconds(800))
             let reader = try await OriginalFrameReader(api: api, item: item)
             await withTaskGroup(of: Void.self) { writes in
                 var writing = false

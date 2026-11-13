@@ -1,9 +1,23 @@
 struct VLCSeekConfirmation {
     let target: Int32
     var displayedBeforeJump: UInt64?
+    var origin: Double? = nil
 
     mutating func observe(position: Double, displayedPictures: UInt64?, playing: Bool) -> Bool {
-        guard abs(position - Double(target) / 1_000) < 1 else {
+        let targetSeconds = Double(target) / 1_000
+        let distance = abs(position - targetSeconds)
+        let arrived: Bool
+        if let origin {
+            let jumpDistance = abs(origin - targetSeconds)
+            if jumpDistance >= 2 {
+                arrived = distance < min(12.0, jumpDistance * 0.5)
+            } else {
+                arrived = distance < 1.5 || abs(position - origin) >= 1.0
+            }
+        } else {
+            arrived = distance < min(12.0, max(1.0, targetSeconds * 0.5))
+        }
+        guard arrived else {
             if let previous = displayedBeforeJump, let displayedPictures {
                 displayedBeforeJump = max(previous, displayedPictures)
             }
@@ -33,6 +47,7 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
     private var position = 0.0
     private var firstFrameDeadline: ContinuousClock.Instant?
     private var pulse: Task<Void, Never>?
+    private var rateSyncTask: Task<Void, Never>?
     private var pendingSeek: Seek?
     private let confirmsSeekFrames: Bool
     private var playCallMilliseconds: Int?
@@ -63,6 +78,10 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
         let player = VLCMediaPlayer()
         player.drawable = view
         let media = VLCMedia(url: url)
+        if confirmsSeekFrames {
+            media?.addOption(":input-fast-seek")
+            media?.addOption(":network-caching=300")
+        }
         if decoder == .software { media?.addOption(":no-hw-dec") }
         player.media = media
         self.player = player
@@ -89,7 +108,14 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
 
     func setPlayback(_ shouldPlay: Bool, rate: Float) {
         guard let player else { return }
+        let rateChanged = abs(player.rate - rate) > 0.01
         player.rate = rate
+        if confirmsSeekFrames, shouldPlay, playbackRequested, rateChanged, hasFrame, pendingSeek == nil {
+            scheduleRateTimingSync()
+        } else if !shouldPlay {
+            rateSyncTask?.cancel()
+            rateSyncTask = nil
+        }
         if shouldPlay, !playbackRequested {
             playbackRequested = true
             if didEnd {
@@ -121,6 +147,8 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
             completion(nil)
             return
         }
+        rateSyncTask?.cancel()
+        rateSyncTask = nil
         cancelSeek()
         pendingSeek = Seek(target: Int32((time * 1_000).rounded()), completion: completion)
         applyMute(to: player)
@@ -130,6 +158,8 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
     func stop() {
         pulse?.cancel()
         pulse = nil
+        rateSyncTask?.cancel()
+        rateSyncTask = nil
         cancelSeek()
         firstFrameDeadline = nil
         playbackRequested = false
@@ -176,36 +206,7 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
             position = Double(milliseconds) / 1_000
         }
         let total = duration(of: player)
-        if confirmsSeekFrames && !hasFrame {
-            // A failed sample-buffer layer drops pictures while VLC still counts
-            // them. A missing layer keeps the previous displayed-picture rule.
-            if let layer = pictureInPictureLayer {
-                if layer.status == .failed {
-                    picturesBeforeVisibleLayer = max(picturesBeforeVisibleLayer, displayedCount)
-                } else if displayedCount > picturesBeforeVisibleLayer {
-                    hasFrame = true
-                    firstFrameDeadline = nil
-                }
-            } else if displayedFrame {
-                hasFrame = true
-                firstFrameDeadline = nil
-            }
-        } else if displayedFrame {
-            hasFrame = true
-            firstFrameDeadline = nil
-        }
-        if let deadline = firstFrameDeadline, ContinuousClock.now >= deadline {
-            let message: String
-            if confirmsSeekFrames, let statistics, statistics.demuxReadBytes > 0 {
-                message = statistics.decodedVideo > 0
-                    ? "VLC 已解码视频，但没有显示画面。"
-                    : "已读取原文件，但 VLC 没有解出视频帧。"
-            } else {
-                message = "原文件没有输出画面。"
-            }
-            fail(message, canRetryInSoftware: canRetryInSoftware)
-            return
-        }
+        markFirstFrameIfReady(displayedCount: displayedCount)
         // VLC 4 reports .stopped at EOF. It also starts in .stopped before opening.
         if state == .stopped, hasFrame, !didEnd {
             playbackRequested = false
@@ -219,6 +220,19 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
         }
         updateSeek(on: player, displayedPictures: statistics?.displayedPictures, canRetryInSoftware: canRetryInSoftware)
         guard self.player != nil else { return }
+        markFirstFrameIfReady(displayedCount: displayedCount)
+        if let deadline = firstFrameDeadline, ContinuousClock.now >= deadline {
+            let message: String
+            if confirmsSeekFrames, let statistics, statistics.demuxReadBytes > 0 {
+                message = statistics.decodedVideo > 0
+                    ? "VLC 已解码视频，但没有显示画面。"
+                    : "已读取原文件，但 VLC 没有解出视频帧。"
+            } else {
+                message = "原文件没有输出画面。"
+            }
+            fail(message, canRetryInSoftware: canRetryInSoftware)
+            return
+        }
         applyMute(to: player)
         onEvent?(.sample(position: reportingPosition, duration: total,
                         playing: playbackRequested && player.isPlaying && reportingPosition != nil,
@@ -226,13 +240,36 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
         updatePulse()
     }
 
+    private func markFirstFrameIfReady(displayedCount: UInt64) {
+        guard !hasFrame else { return }
+        let displayedFrame = displayedCount > 0
+        if confirmsSeekFrames {
+            // A failed sample-buffer layer drops pictures while VLC still counts
+            // them. A missing layer keeps the previous displayed-picture rule.
+            if let layer = pictureInPictureLayer {
+                if layer.status == .failed {
+                    picturesBeforeVisibleLayer = max(picturesBeforeVisibleLayer, displayedCount)
+                    return
+                }
+                guard pendingSeek == nil, displayedCount > picturesBeforeVisibleLayer else { return }
+            } else {
+                guard pendingSeek == nil, displayedFrame else { return }
+            }
+        } else {
+            guard pendingSeek == nil, displayedFrame else { return }
+        }
+        hasFrame = true
+        firstFrameDeadline = nil
+    }
+
     private func updateSeek(on player: VLCMediaPlayer, displayedPictures: UInt64?, canRetryInSoftware: Bool) {
         guard var seek = pendingSeek else { return }
-        let deadline = seek.deadline ?? (ContinuousClock.now + .seconds(8))
-        seek.deadline = deadline
-        if seek.confirmation == nil, player.isSeekable {
+        if seek.confirmation == nil {
+            guard player.isSeekable else { return }
             let beforeJump = confirmsSeekFrames && playbackRequested ? (displayedPictures ?? 0) : nil
-            seek.confirmation = VLCSeekConfirmation(target: seek.target, displayedBeforeJump: beforeJump)
+            let origin = hasFrame ? position : nil
+            seek.confirmation = VLCSeekConfirmation(target: seek.target, displayedBeforeJump: beforeJump, origin: origin)
+            seek.deadline = ContinuousClock.now + .seconds(12)
             pendingSeek = seek
             // The sample-buffer display keeps the last image across a time jump
             // and then drops every later picture once its status is failed.
@@ -241,6 +278,7 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
             let started = ContinuousClock.now
             player.time = VLCTime(int: seek.target)
             if confirmsSeekFrames { seekCallMilliseconds = elapsedMilliseconds(since: started) }
+            if !hasFrame { firstFrameDeadline = ContinuousClock.now + .seconds(15) }
             return
         }
         // A native clock jump can precede the next video frame.
@@ -248,8 +286,13 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
         if !displayFailed && seek.confirmation?.observe(position: position, displayedPictures: displayedPictures, playing: playbackRequested) == true {
             pendingSeek = nil
             seek.completion(position)
-        } else if ContinuousClock.now >= deadline {
-            if confirmsSeekFrames && playbackRequested {
+        } else if let deadline = seek.deadline, ContinuousClock.now >= deadline {
+            let hasNewFrames = (displayedPictures ?? 0) > (picturesAtSeek ?? 0)
+            let nearTarget = abs(position - Double(seek.target) / 1_000) < 30
+            if !displayFailed && hasNewFrames && (hasFrame || nearTarget) {
+                pendingSeek = nil
+                seek.completion(position)
+            } else if confirmsSeekFrames && playbackRequested {
                 fail("未能跳转到指定位置。", canRetryInSoftware: canRetryInSoftware)
             } else {
                 pendingSeek = nil
@@ -287,6 +330,27 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
             return
         }
         layer.flush()
+    }
+
+    private func scheduleRateTimingSync() {
+        rateSyncTask?.cancel()
+        flushDisplayLayer(onlyWhenFailed: false)
+        rateSyncTask = Task { [weak self] in
+            // VLC CoreAudio only reports audio timing every 1000 ms after queued
+            // old-rate PCM drains. Posting an unknown route change resets the
+            // report interval without restarting the AudioUnit, updating the clock
+            // as soon as the 300 ms queue clears.
+            for delayMs in [180, 160] {
+                do { try await Task.sleep(for: .milliseconds(delayMs)) } catch { return }
+                guard let self, self.player != nil, self.playbackRequested, self.pendingSeek == nil else { return }
+                NotificationCenter.default.post(
+                    name: AVAudioSession.routeChangeNotification,
+                    object: AVAudioSession.sharedInstance(),
+                    userInfo: [AVAudioSessionRouteChangeReasonKey: AVAudioSession.RouteChangeReason.unknown.rawValue]
+                )
+                self.flushDisplayLayer(onlyWhenFailed: false)
+            }
+        }
     }
 
     private func elapsedMilliseconds(since start: ContinuousClock.Instant) -> Int {
@@ -357,6 +421,8 @@ final class VLCOriginalFrameDecoder: NSObject, VLCMediaThumbnailerDelegate {
     init?(url: URL, width: Int?, height: Int?) {
         _ = VLCOriginalPlayer.installLogSink
         guard let media = VLCMedia(url: url) else { return nil }
+        media.addOption(":input-fast-seek")
+        media.addOption(":no-audio")
         self.media = media
         if let width, let height, width > 0, height > 0 {
             size = CGSize(width: width, height: height)
@@ -368,13 +434,16 @@ final class VLCOriginalFrameDecoder: NSObject, VLCMediaThumbnailerDelegate {
         guard seconds.isFinite, seconds >= 0, seconds * 1_000 <= Double(Int32.max) else {
             throw PeachAPIError(message: "预览图时间无效")
         }
-        let size = try await originalSize()
+        let sourceSize = try await originalSize()
+        let scale = min(1.0, min(960.0 / max(sourceSize.width, 1), 540.0 / max(sourceSize.height, 1)))
+        let targetSize = CGSize(width: max(1, (sourceSize.width * scale).rounded()),
+                                height: max(1, (sourceSize.height * scale).rounded()))
         try Task.checkCancellation()
         let thumbnailer = VLCMediaThumbnailer(media: media, andDelegate: self)
-        thumbnailer.thumbnailWidth = size.width
-        thumbnailer.thumbnailHeight = size.height
+        thumbnailer.thumbnailWidth = targetSize.width
+        thumbnailer.thumbnailHeight = targetSize.height
         thumbnailer.snapshotTime = VLCTime(int: Int32((seconds * 1_000).rounded()))
-        thumbnailer.preciseSeek = true
+        thumbnailer.preciseSeek = false
         thumbnailer.hardwareDecodingEnabled = true
         let id = ObjectIdentifier(thumbnailer)
         let timeout = Task { [weak self] in
@@ -446,24 +515,32 @@ private final class VLCPlayerRetirement: @unchecked Sendable {
     init(_ player: VLCMediaPlayer) { self.player = player }
 
     func stopAndReleaseWhenStopped() {
-        stateObserver = NotificationCenter.default.addObserver(
-            forName: VLCMediaPlayer.stateChangedNotification,
-            object: player, queue: .main
-        ) { [self] _ in
-            finishIfStopped()
+        DispatchQueue.main.async { [self] in
+            guard player.state != .stopped, player.state != .error else {
+                releaseResources()
+                return
+            }
+            stateObserver = NotificationCenter.default.addObserver(
+                forName: VLCMediaPlayer.stateChangedNotification,
+                object: player, queue: .main
+            ) { [self] _ in
+                if player.state == .stopped || player.state == .error {
+                    releaseResources()
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(5)) { [self] in
+                releaseResources()
+            }
         }
         player.stop()
-        finishIfStopped()
     }
 
-    private func finishIfStopped() {
-        DispatchQueue.main.async { [self] in
-            guard !didFinish, player.state == .stopped else { return }
-            didFinish = true
-            if let stateObserver { NotificationCenter.default.removeObserver(stateObserver) }
-            stateObserver = nil
-            player.media = nil
-        }
+    private func releaseResources() {
+        guard !didFinish else { return }
+        didFinish = true
+        if let stateObserver { NotificationCenter.default.removeObserver(stateObserver) }
+        stateObserver = nil
+        player.media = nil
     }
 }
 

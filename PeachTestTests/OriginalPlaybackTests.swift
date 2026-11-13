@@ -386,6 +386,17 @@ final class OriginalPlaybackTests: XCTestCase {
         XCTAssertNil(PlayerMemory.shared.position(for: controller.item.id))
     }
 
+    func testVLCSeekConfirmationAcceptsMKVKeyframeLandingWithinJumpRange() {
+        var startupSeek = VLCSeekConfirmation(target: 120_000, displayedBeforeJump: 0)
+        XCTAssertFalse(startupSeek.observe(position: 0.2, displayedPictures: 1, playing: true))
+        XCTAssertFalse(startupSeek.observe(position: 117.5, displayedPictures: 1, playing: true))
+        XCTAssertTrue(startupSeek.observe(position: 117.6, displayedPictures: 2, playing: true))
+
+        var forwardTen = VLCSeekConfirmation(target: 110_000, displayedBeforeJump: 40, origin: 100.0)
+        XCTAssertFalse(forwardTen.observe(position: 100.4, displayedPictures: 41, playing: true))
+        XCTAssertTrue(forwardTen.observe(position: 107.2, displayedPictures: 42, playing: true))
+    }
+
     func testDetailFramesShareSignedOriginalAndRetainSourceResolution() async throws {
         let fixture = try OriginalPlaybackFixture()
         defer { fixture.stop() }
