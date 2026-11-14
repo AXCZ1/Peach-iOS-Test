@@ -918,15 +918,15 @@ private enum VLCAVSampleAudioSyncBridge {
         guard samplePtr.load(fromByteOffset: offsets.stopped, as: UInt8.self) == 0,
               samplePtr.load(fromByteOffset: offsets.dateReached, as: UInt8.self) != 0,
               samplePtr.load(fromByteOffset: offsets.firstPts, as: Int64.self) > 0,
-              let aout = isAlignedPointer(samplePtr.load(fromByteOffset: offsets.aout, as: UnsafeMutableRawPointer?)),
-              let stream = isAlignedPointer(aout.load(fromByteOffset: StreamOffsets.aoutMainStream, as: UnsafeMutableRawPointer?)),
-              stream.load(fromByteOffset: StreamOffsets.streamOwnerAout, as: UnsafeMutableRawPointer?) == aout,
-              let clock = isAlignedPointer(stream.load(fromByteOffset: StreamOffsets.syncClock, as: UnsafeMutableRawPointer?)),
-              let clockMain = isAlignedPointer(clock.load(fromByteOffset: StreamOffsets.clockParentMain, as: UnsafeMutableRawPointer?)) else {
+              let aout = isAlignedPointer(samplePtr.load(fromByteOffset: offsets.aout, as: Optional<UnsafeMutableRawPointer>.self)),
+              let stream = isAlignedPointer(aout.load(fromByteOffset: StreamOffsets.aoutMainStream, as: Optional<UnsafeMutableRawPointer>.self)),
+              stream.load(fromByteOffset: StreamOffsets.streamOwnerAout, as: Optional<UnsafeMutableRawPointer>.self) == aout,
+              let clock = isAlignedPointer(stream.load(fromByteOffset: StreamOffsets.syncClock, as: Optional<UnsafeMutableRawPointer>.self)),
+              let clockMain = isAlignedPointer(clock.load(fromByteOffset: StreamOffsets.clockParentMain, as: Optional<UnsafeMutableRawPointer>.self)) else {
             return nil
         }
-        let master = clockMain.load(fromByteOffset: StreamOffsets.clockMainMaster, as: UnsafeMutableRawPointer?)
-        let inputMaster = clockMain.load(fromByteOffset: StreamOffsets.clockMainInputMaster, as: UnsafeMutableRawPointer?)
+        let master = clockMain.load(fromByteOffset: StreamOffsets.clockMainMaster, as: Optional<UnsafeMutableRawPointer>.self)
+        let inputMaster = clockMain.load(fromByteOffset: StreamOffsets.clockMainInputMaster, as: Optional<UnsafeMutableRawPointer>.self)
         guard master == nil, inputMaster != nil else {
             return nil
         }
@@ -952,7 +952,7 @@ private enum VLCAVSampleAudioSyncBridge {
 
         state.lock.lock()
         let stillActive = state.installed && state.activeOrdinaryPlayers > 0
-        var expectedRate = state.expectedRate
+        let expectedRate = state.expectedRate
         let rateChangeNs = state.rateChangeTimestampNs
         if stillActive {
             state.activeSample = sample
