@@ -74,7 +74,14 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
         view.backgroundColor = .black
         view.clipsToBounds = true
         view.isUserInteractionEnabled = false
-        let player = VLCMediaPlayer()
+        let player: VLCMediaPlayer
+        if confirmsSeekFrames {
+            // `aout` inherits `audio-time-stretch` from `libvlc`, not `media` options, so pass it via private VLCLibrary options.
+            player = VLCMediaPlayer(options: ["--no-audio-time-stretch"])
+            player.libraryInstance.loggers = [Self.logSink]
+        } else {
+            player = VLCMediaPlayer()
+        }
         player.drawable = view
         let media = VLCMedia(url: url)
         if mutedOnly {
@@ -89,7 +96,7 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
         player.media = media
         self.player = player
         PeachRuntimeLogger.shared.log(
-            "VLC 初始化 decoder=\(decoder == .software ? "software" : "auto") confirmsSeek=\(confirmsSeekFrames) mutedOnly=\(mutedOnly) clockMaster=\(confirmsSeekFrames ? "input" : "auto") url=\(url.absoluteString)",
+            "VLC 初始化 decoder=\(decoder == .software ? "software" : "auto") confirmsSeek=\(confirmsSeekFrames) mutedOnly=\(mutedOnly) clockMaster=\(confirmsSeekFrames ? "input" : "auto") timeStretch=\(confirmsSeekFrames ? "false" : "auto") url=\(url.absoluteString)",
             level: .info,
             category: "player.vlc",
             source: "VLCOriginalPlayer"
