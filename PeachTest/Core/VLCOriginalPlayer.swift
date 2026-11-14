@@ -30,6 +30,10 @@ struct VLCSeekConfirmation {
 
 #if os(iOS) && !SWIFT_PACKAGE
 import AVFoundation
+import CoreMedia
+import Dispatch
+import Foundation
+import ObjectiveC.runtime
 import UIKit
 @preconcurrency import VLCKit
 
@@ -49,6 +53,7 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
     private var pulse: Task<Void, Never>?
     private var pendingSeek: Seek?
     private let confirmsSeekFrames: Bool
+    private var audioSyncLease: VLCAVSampleAudioSyncBridge.Lease?
     private var playCallMilliseconds: Int?
     private var seekCallMilliseconds: Int?
     private var picturesAtSeek: UInt64?
@@ -74,13 +79,9 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
         view.backgroundColor = .black
         view.clipsToBounds = true
         view.isUserInteractionEnabled = false
-        let player: VLCMediaPlayer
+        let player = VLCMediaPlayer()
         if confirmsSeekFrames {
-            // `aout` inherits `audio-time-stretch` from `libvlc`, not `media` options, so pass it via private VLCLibrary options.
-            player = VLCMediaPlayer(options: ["--no-audio-time-stretch"])
-            player.libraryInstance.loggers = [Self.logSink]
-        } else {
-            player = VLCMediaPlayer()
+            self.audioSyncLease = VLCAVSampleAudioSyncBridge.acquireLease(initialRate: 1.0)
         }
         player.drawable = view
         let media = VLCMedia(url: url)
@@ -96,7 +97,7 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
         player.media = media
         self.player = player
         PeachRuntimeLogger.shared.log(
-            "VLC 初始化 decoder=\(decoder == .software ? "software" : "auto") confirmsSeek=\(confirmsSeekFrames) mutedOnly=\(mutedOnly) clockMaster=\(confirmsSeekFrames ? "input" : "auto") timeStretch=\(confirmsSeekFrames ? "false" : "auto") url=\(url.absoluteString)",
+            "VLC 初始化 decoder=\(decoder == .software ? "software" : "auto") confirmsSeek=\(confirmsSeekFrames) mutedOnly=\(mutedOnly) clockMaster=\(confirmsSeekFrames ? "input" : "auto") url=\(url.absoluteString)",
             level: .info,
             category: "player.vlc",
             source: "VLCOriginalPlayer"
@@ -125,6 +126,9 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
     func setPlayback(_ shouldPlay: Bool, rate: Float) {
         guard let player else { return }
         let rateChanged = abs(player.rate - rate) > 0.01
+        if confirmsSeekFrames, rateChanged {
+            VLCAVSampleAudioSyncBridge.willChangeRate(to: rate)
+        }
         player.rate = rate
         if confirmsSeekFrames, shouldPlay, playbackRequested, rateChanged, hasFrame, pendingSeek == nil {
             flushDisplayLayer(onlyWhenFailed: false)
@@ -199,6 +203,8 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
         cancelSeek()
         firstFrameDeadline = nil
         playbackRequested = false
+        audioSyncLease?.release()
+        audioSyncLease = nil
         guard let player else { return }
         self.player = nil
         player.audio?.isMuted = true
@@ -689,6 +695,533 @@ private final class VLCPrivateLogSink: NSObject, VLCLogging {
             source: context?.objectType ?? "VLCKit",
             fields: fields
         )
+    }
+}
+
+/// Keeps VLCKit `VLCAVSample` audio timing reports aligned with `dec.c` under `:clock-master=input`
+/// when `scaletempo` compresses/expands duration during rate changes such as `2×` <-> `1×`.
+private enum VLCAVSampleAudioSyncBridge {
+    typealias WhenTimeObservedIMP = @convention(c) (AnyObject, Selector, CMTime) -> Void
+    typealias PlayIMP = @convention(c) (AnyObject, Selector, UnsafeMutableRawPointer?, Int64) -> Void
+
+    final class Lease: @unchecked Sendable {
+        private let lock = NSLock()
+        private var released = false
+
+        func release() {
+            lock.lock()
+            let shouldRelease = !released
+            released = true
+            lock.unlock()
+            if shouldRelease {
+                VLCAVSampleAudioSyncBridge.releaseOrdinaryPlayer()
+            }
+        }
+
+        deinit {
+            release()
+        }
+    }
+
+    private struct SampleOffsets: @unchecked Sendable {
+        let aout: Int
+        let syncIvar: Ivar
+        let ptsSamples: Int
+        let firstPts: Int
+        let sampleRate: Int
+        let stopped: Int
+        let dateReached: Int
+    }
+
+    // Verified against VLCKit 4.0.0a25 arm64 disassembly (`dec.c`, `clock.c`, `output.c`).
+    private enum StreamOffsets {
+        static let aoutMainStream = 0x98
+        static let streamOwnerAout = 0x00
+        static let syncClock = 0x68
+        static let syncRate = 0x74
+        static let timingFirstPts = 0xb0
+        static let timingWrittenSamples = 0xb8
+        static let timingRateSystemTs = 0xc0
+        static let timingRateAudioTs = 0xc8
+        static let timingSystemTs = 0xd0
+        static let timingAudioTs = 0xd8
+        static let timingRate = 0xe8
+        static let mixerFormatRate = 0x148
+        static let clockParentMain = 0x08
+        static let clockMainMaster = 0x38
+        static let clockMainInputMaster = 0x40
+    }
+
+    private final class State: @unchecked Sendable {
+        let lock = NSLock()
+        let reportLock = NSLock()
+        var attemptedInstall = false
+        var installed = false
+        var activeOrdinaryPlayers = 0
+        var expectedRate: Float = 1.0
+        var rateChangeTimestampNs: UInt64 = 0
+        weak var activeSample: AnyObject?
+        var offsets: SampleOffsets?
+        var origWhenTimeObserved: WhenTimeObservedIMP?
+        var origPlay: PlayIMP?
+        var compensatedReports: UInt64 = 0
+        var deferredTransitions: UInt64 = 0
+        var lastLoggedRate: Float?
+    }
+
+    private static let state = State()
+    private static var whenTimeObservedSelector: Selector { Selector(("whenTimeObserved:")) }
+    private static var playSelector: Selector { Selector(("play:date:")) }
+    private static let transitionHoldMaxNanoseconds: UInt64 = 250_000_000
+
+    static func acquireLease(initialRate: Float) -> Lease {
+        installIfNeeded()
+        state.lock.lock()
+        state.activeOrdinaryPlayers += 1
+        state.expectedRate = initialRate
+        state.rateChangeTimestampNs = DispatchTime.now().uptimeNanoseconds
+        state.lastLoggedRate = nil
+        state.lock.unlock()
+        return Lease()
+    }
+
+    static func releaseOrdinaryPlayer() {
+        state.lock.lock()
+        if state.activeOrdinaryPlayers > 0 {
+            state.activeOrdinaryPlayers -= 1
+        }
+        if state.activeOrdinaryPlayers == 0 {
+            state.activeSample = nil
+            state.expectedRate = 1.0
+            state.lastLoggedRate = nil
+        }
+        state.lock.unlock()
+    }
+
+    static func willChangeRate(to newRate: Float) {
+        state.lock.lock()
+        guard state.installed,
+              state.activeOrdinaryPlayers > 0,
+              let offsets = state.offsets else {
+            state.expectedRate = newRate
+            state.rateChangeTimestampNs = DispatchTime.now().uptimeNanoseconds
+            state.lock.unlock()
+            return
+        }
+        state.expectedRate = newRate
+        state.rateChangeTimestampNs = DispatchTime.now().uptimeNanoseconds
+        let sample = state.activeSample
+        state.lock.unlock()
+
+        guard let sample else { return }
+
+        state.reportLock.lock()
+        let samplePtr = Unmanaged.passUnretained(sample).toOpaque()
+        if let (_, stream) = validatedInputMasterStream(samplePtr: samplePtr, offsets: offsets) {
+            stream.storeBytes(of: Int64(0), toByteOffset: StreamOffsets.timingRateSystemTs, as: Int64.self)
+            stream.storeBytes(of: Int64(0), toByteOffset: StreamOffsets.timingRateAudioTs, as: Int64.self)
+            stream.storeBytes(of: Int64(0), toByteOffset: StreamOffsets.timingSystemTs, as: Int64.self)
+        }
+        state.reportLock.unlock()
+    }
+
+    private static func installIfNeeded() {
+        state.lock.lock()
+        if state.attemptedInstall {
+            state.lock.unlock()
+            return
+        }
+        state.attemptedInstall = true
+
+        guard let sampleClass = NSClassFromString("VLCAVSample"),
+              let aoutIvar = class_getInstanceVariable(sampleClass, "_aout"),
+              let syncIvar = class_getInstanceVariable(sampleClass, "_sync"),
+              let ptsSamplesIvar = class_getInstanceVariable(sampleClass, "_ptsSamples"),
+              let firstPtsIvar = class_getInstanceVariable(sampleClass, "_firstPts"),
+              let sampleRateIvar = class_getInstanceVariable(sampleClass, "_sampleRate"),
+              let stoppedIvar = class_getInstanceVariable(sampleClass, "_stopped"),
+              let dateReachedIvar = class_getInstanceVariable(sampleClass, "_dateReached"),
+              let whenMethod = class_getInstanceMethod(sampleClass, whenTimeObservedSelector),
+              let playMethod = class_getInstanceMethod(sampleClass, playSelector) else {
+            state.lock.unlock()
+            PeachRuntimeLogger.shared.log(
+                "VLCAVSampleAudioSyncBridge skipped: missing VLCAVSample class/ivars/methods",
+                level: .warning,
+                category: "vlc.player",
+                source: "VLCAVSampleAudioSyncBridge"
+            )
+            return
+        }
+
+        let offsets = SampleOffsets(
+            aout: ivar_getOffset(aoutIvar),
+            syncIvar: syncIvar,
+            ptsSamples: ivar_getOffset(ptsSamplesIvar),
+            firstPts: ivar_getOffset(firstPtsIvar),
+            sampleRate: ivar_getOffset(sampleRateIvar),
+            stopped: ivar_getOffset(stoppedIvar),
+            dateReached: ivar_getOffset(dateReachedIvar)
+        )
+
+        guard offsets.aout > 0,
+              offsets.ptsSamples > 0,
+              offsets.firstPts > 0,
+              offsets.sampleRate > 0,
+              offsets.stopped > 0,
+              offsets.dateReached > 0 else {
+            state.lock.unlock()
+            PeachRuntimeLogger.shared.log(
+                "VLCAVSampleAudioSyncBridge skipped: invalid ivar offsets",
+                level: .warning,
+                category: "vlc.player",
+                source: "VLCAVSampleAudioSyncBridge"
+            )
+            return
+        }
+
+        let prevWhenIMP = method_getImplementation(whenMethod)
+        let prevPlayIMP = method_getImplementation(playMethod)
+        state.origWhenTimeObserved = unsafeBitCast(prevWhenIMP, to: WhenTimeObservedIMP.self)
+        state.origPlay = unsafeBitCast(prevPlayIMP, to: PlayIMP.self)
+        state.offsets = offsets
+        state.installed = true
+
+        let whenHook: WhenTimeObservedIMP = { obj, sel, time in
+            VLCAVSampleAudioSyncBridge.handleWhenTimeObserved(sample: obj, selector: sel, time: time)
+        }
+        let playHook: PlayIMP = { obj, sel, frame, date in
+            VLCAVSampleAudioSyncBridge.handlePlay(sample: obj, selector: sel, frame: frame, date: date)
+        }
+        method_setImplementation(whenMethod, unsafeBitCast(whenHook, to: IMP.self))
+        method_setImplementation(playMethod, unsafeBitCast(playHook, to: IMP.self))
+        state.lock.unlock()
+
+        PeachRuntimeLogger.shared.log(
+            "VLCAVSampleAudioSyncBridge installed aout=\(offsets.aout) ptsSamples=\(offsets.ptsSamples) firstPts=\(offsets.firstPts) sampleRate=\(offsets.sampleRate) stopped=\(offsets.stopped) dateReached=\(offsets.dateReached)",
+            level: .info,
+            category: "vlc.player",
+            source: "VLCAVSampleAudioSyncBridge"
+        )
+    }
+
+    private static func isAlignedPointer(_ ptr: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+        guard let ptr else { return nil }
+        let addr = UInt(bitPattern: ptr)
+        guard addr >= 0x1000, addr & 0x7 == 0 else { return nil }
+        return ptr
+    }
+
+    private static func validatedInputMasterStream(
+        samplePtr: UnsafeMutableRawPointer,
+        offsets: SampleOffsets
+    ) -> (aout: UnsafeMutableRawPointer, stream: UnsafeMutableRawPointer)? {
+        guard samplePtr.load(fromByteOffset: offsets.stopped, as: UInt8.self) == 0,
+              samplePtr.load(fromByteOffset: offsets.dateReached, as: UInt8.self) != 0,
+              samplePtr.load(fromByteOffset: offsets.firstPts, as: Int64.self) > 0,
+              let aout = isAlignedPointer(samplePtr.load(fromByteOffset: offsets.aout, as: UnsafeMutableRawPointer?)),
+              let stream = isAlignedPointer(aout.load(fromByteOffset: StreamOffsets.aoutMainStream, as: UnsafeMutableRawPointer?)),
+              stream.load(fromByteOffset: StreamOffsets.streamOwnerAout, as: UnsafeMutableRawPointer?) == aout,
+              let clock = isAlignedPointer(stream.load(fromByteOffset: StreamOffsets.syncClock, as: UnsafeMutableRawPointer?)),
+              let clockMain = isAlignedPointer(clock.load(fromByteOffset: StreamOffsets.clockParentMain, as: UnsafeMutableRawPointer?)) else {
+            return nil
+        }
+        let master = clockMain.load(fromByteOffset: StreamOffsets.clockMainMaster, as: UnsafeMutableRawPointer?)
+        let inputMaster = clockMain.load(fromByteOffset: StreamOffsets.clockMainInputMaster, as: UnsafeMutableRawPointer?)
+        guard master == nil, inputMaster != nil else {
+            return nil
+        }
+        return (aout, stream)
+    }
+
+    private static func handlePlay(
+        sample: AnyObject,
+        selector: Selector,
+        frame: UnsafeMutableRawPointer?,
+        date: Int64
+    ) {
+        state.lock.lock()
+        let origPlay = state.origPlay
+        let offsets = state.offsets
+        let origWhen = state.origWhenTimeObserved
+        let active = state.installed && state.activeOrdinaryPlayers > 0
+        state.lock.unlock()
+
+        origPlay?(sample, selector, frame, date)
+
+        guard active, let offsets, let origWhen else { return }
+
+        state.lock.lock()
+        let stillActive = state.installed && state.activeOrdinaryPlayers > 0
+        var expectedRate = state.expectedRate
+        let rateChangeNs = state.rateChangeTimestampNs
+        if stillActive {
+            state.activeSample = sample
+        }
+        state.lock.unlock()
+
+        guard stillActive else { return }
+
+        let nowNs = DispatchTime.now().uptimeNanoseconds
+        let samplePtr = Unmanaged.passUnretained(sample).toOpaque()
+        let outcome = evaluateAndReportTiming(
+            sample: sample,
+            samplePtr: samplePtr,
+            offsets: offsets,
+            expectedRate: expectedRate,
+            rateChangeNs: rateChangeNs,
+            nowNs: nowNs,
+            onlyWhenCompensatingOrZeroSystemTs: true,
+            explicitTime: nil,
+            origWhenTimeObserved: origWhen
+        )
+        recordAndLogOutcome(outcome)
+    }
+
+    private static func handleWhenTimeObserved(
+        sample: AnyObject,
+        selector: Selector,
+        time: CMTime
+    ) {
+        state.lock.lock()
+        let offsets = state.offsets
+        let origWhen = state.origWhenTimeObserved
+        let installed = state.installed
+        let active = installed && state.activeOrdinaryPlayers > 0
+        let expectedRate = state.expectedRate
+        let rateChangeNs = state.rateChangeTimestampNs
+        state.lock.unlock()
+
+        guard let origWhen else { return }
+
+        guard installed, active, let offsets else {
+            if isValidNonZeroCMTime(time) {
+                origWhen(sample, selector, time)
+            }
+            return
+        }
+
+        let samplePtr = Unmanaged.passUnretained(sample).toOpaque()
+        let stopped = samplePtr.load(fromByteOffset: offsets.stopped, as: UInt8.self)
+        let firstPts = samplePtr.load(fromByteOffset: offsets.firstPts, as: Int64.self)
+        guard stopped == 0, firstPts > 0 else { return }
+
+        state.lock.lock()
+        state.activeSample = sample
+        state.lock.unlock()
+
+        let nowNs = DispatchTime.now().uptimeNanoseconds
+        let outcome = evaluateAndReportTiming(
+            sample: sample,
+            samplePtr: samplePtr,
+            offsets: offsets,
+            expectedRate: expectedRate,
+            rateChangeNs: rateChangeNs,
+            nowNs: nowNs,
+            onlyWhenCompensatingOrZeroSystemTs: false,
+            explicitTime: time,
+            origWhenTimeObserved: origWhen
+        )
+
+        if case .forwardUnmodified = outcome {
+            if isValidNonZeroCMTime(time) {
+                origWhen(sample, selector, time)
+            }
+            return
+        }
+
+        recordAndLogOutcome(outcome)
+    }
+
+    private enum TimingOutcome {
+        case none
+        case forwardUnmodified
+        case deferredTransition
+        case reported(
+            syncRate: Float,
+            adoptedRate: Bool,
+            compensated: Bool,
+            playedUs: Int64,
+            writtenUs: Int64,
+            remainingHwUs: Int64,
+            offsetUs: Int64
+        )
+    }
+
+    private static func isValidNonZeroCMTime(_ time: CMTime) -> Bool {
+        time.flags.contains(.valid) && !time.flags.contains(.indefinite) && time.timescale > 0 && time.value != 0
+    }
+
+    private static func evaluateAndReportTiming(
+        sample: AnyObject,
+        samplePtr: UnsafeMutableRawPointer,
+        offsets: SampleOffsets,
+        expectedRate: Float,
+        rateChangeNs: UInt64,
+        nowNs: UInt64,
+        onlyWhenCompensatingOrZeroSystemTs: Bool,
+        explicitTime: CMTime?,
+        origWhenTimeObserved: WhenTimeObservedIMP
+    ) -> TimingOutcome {
+        state.reportLock.lock()
+        defer { state.reportLock.unlock() }
+
+        guard let (_, stream) = validatedInputMasterStream(samplePtr: samplePtr, offsets: offsets) else {
+            return explicitTime == nil ? .none : .forwardUnmodified
+        }
+
+        let syncRate = stream.load(fromByteOffset: StreamOffsets.syncRate, as: Float.self)
+        guard syncRate.isFinite, syncRate > 0.05, syncRate <= 8.0 else {
+            return .none
+        }
+
+        stream.storeBytes(of: Int64(0), toByteOffset: StreamOffsets.timingRateSystemTs, as: Int64.self)
+        stream.storeBytes(of: Int64(0), toByteOffset: StreamOffsets.timingRateAudioTs, as: Int64.self)
+        stream.storeBytes(of: syncRate, toByteOffset: StreamOffsets.timingRate, as: Float.self)
+
+        let rateMatches = abs(syncRate - expectedRate) <= 0.01
+        let holdExpired = nowNs >= rateChangeNs && (nowNs - rateChangeNs) >= transitionHoldMaxNanoseconds
+        if !rateMatches && !holdExpired {
+            stream.storeBytes(of: Int64(0), toByteOffset: StreamOffsets.timingSystemTs, as: Int64.self)
+            return .deferredTransition
+        }
+
+        let systemTs = stream.load(fromByteOffset: StreamOffsets.timingSystemTs, as: Int64.self)
+        if onlyWhenCompensatingOrZeroSystemTs && abs(syncRate - 1.0) <= 0.001 && systemTs != 0 {
+            return .none
+        }
+
+        let playedTime: CMTime
+        if let explicitTime {
+            playedTime = explicitTime
+        } else {
+            guard let sync = object_getIvar(sample, offsets.syncIvar) as? AVSampleBufferRenderSynchronizer else {
+                return .none
+            }
+            playedTime = sync.currentTime()
+        }
+
+        guard playedTime.flags.contains(.valid),
+              !playedTime.flags.contains(.indefinite),
+              playedTime.timescale > 0 else {
+            return .none
+        }
+
+        let sampleFirstPts = samplePtr.load(fromByteOffset: offsets.firstPts, as: Int64.self)
+        let streamFirstPts = stream.load(fromByteOffset: StreamOffsets.timingFirstPts, as: Int64.self)
+        let writtenSamples = stream.load(fromByteOffset: StreamOffsets.timingWrittenSamples, as: UInt64.self)
+        let mixerRate = stream.load(fromByteOffset: StreamOffsets.mixerFormatRate, as: UInt32.self)
+        guard sampleFirstPts > 0, streamFirstPts > 0, mixerRate > 0 else { return .none }
+
+        let playedUs = CMTimeConvertScale(playedTime, timescale: 1_000_000, method: .default).value
+        let adoptedRate = !rateMatches && holdExpired
+
+        if abs(syncRate - 1.0) <= 0.001 {
+            let safeTime = playedTime.value == 0
+                ? CMTime(value: 1, timescale: 1_000_000)
+                : playedTime
+            origWhenTimeObserved(sample, whenTimeObservedSelector, safeTime)
+            return .reported(
+                syncRate: syncRate,
+                adoptedRate: adoptedRate,
+                compensated: false,
+                playedUs: playedUs,
+                writtenUs: 0,
+                remainingHwUs: 0,
+                offsetUs: playedUs
+            )
+        }
+
+        let (mul, overflow) = writtenSamples.multipliedReportingOverflow(by: 1_000_000)
+        guard !overflow else { return .none }
+        let writtenUs64 = mul / UInt64(mixerRate)
+        guard writtenUs64 <= UInt64(Int64.max) else { return .none }
+        let writtenUs = Int64(writtenUs64)
+        let remainingHwUs = writtenUs - playedUs
+        let scaledRemainingDouble = Double(remainingHwUs) * Double(syncRate)
+        guard scaledRemainingDouble.isFinite,
+              abs(scaledRemainingDouble) < Double(Int64.max / 2) else {
+            return .none
+        }
+
+        let scaledRemainingUs = Int64(scaledRemainingDouble.rounded())
+        var compensatedOffsetUs = (streamFirstPts &- sampleFirstPts) &+ writtenUs &- scaledRemainingUs
+        if compensatedOffsetUs == 0 {
+            compensatedOffsetUs = 1
+        }
+        if sampleFirstPts &+ compensatedOffsetUs == 0 {
+            compensatedOffsetUs &+= 1
+        }
+
+        let reportTime = CMTime(value: compensatedOffsetUs, timescale: 1_000_000)
+        origWhenTimeObserved(sample, whenTimeObservedSelector, reportTime)
+        return .reported(
+            syncRate: syncRate,
+            adoptedRate: adoptedRate,
+            compensated: true,
+            playedUs: playedUs,
+            writtenUs: writtenUs,
+            remainingHwUs: remainingHwUs,
+            offsetUs: compensatedOffsetUs
+        )
+    }
+
+    private static func recordAndLogOutcome(_ outcome: TimingOutcome) {
+        switch outcome {
+        case .none, .forwardUnmodified:
+            return
+        case .deferredTransition:
+            state.lock.lock()
+            state.deferredTransitions += 1
+            state.lock.unlock()
+            return
+        case let .reported(syncRate, adoptedRate, compensated, playedUs, writtenUs, remainingHwUs, offsetUs):
+            state.lock.lock()
+            if adoptedRate {
+                state.expectedRate = syncRate
+            }
+            if compensated {
+                state.compensatedReports += 1
+            }
+            let count = state.compensatedReports
+            let deferred = state.deferredTransitions
+            let previousRate = state.lastLoggedRate
+            let rateSwitched = previousRate.map { abs($0 - syncRate) > 0.01 } ?? compensated
+            if rateSwitched {
+                state.lastLoggedRate = syncRate
+            }
+            state.lock.unlock()
+
+            guard rateSwitched || (compensated && count % 50 == 0) else { return }
+            if compensated {
+                PeachRuntimeLogger.shared.log(
+                    "Audio sync compensated rate=\(String(format: "%.2f", syncRate)) playedUs=\(playedUs) writtenUs=\(writtenUs) remainingUs=\(remainingHwUs) offsetUs=\(offsetUs)",
+                    level: rateSwitched ? .info : .debug,
+                    category: "vlc.player",
+                    source: "VLCAVSampleAudioSyncBridge",
+                    fields: [
+                        "rate": String(format: "%.2f", syncRate),
+                        "played_us": String(playedUs),
+                        "written_us": String(writtenUs),
+                        "remaining_us": String(remainingHwUs),
+                        "offset_us": String(offsetUs),
+                        "reports": String(count),
+                        "deferred": String(deferred)
+                    ]
+                )
+            } else {
+                PeachRuntimeLogger.shared.log(
+                    "Audio sync restored 1.0x playedUs=\(playedUs)",
+                    level: .info,
+                    category: "vlc.player",
+                    source: "VLCAVSampleAudioSyncBridge",
+                    fields: [
+                        "rate": String(format: "%.2f", syncRate),
+                        "reports": String(count),
+                        "deferred": String(deferred)
+                    ]
+                )
+            }
+        }
     }
 }
 #endif
