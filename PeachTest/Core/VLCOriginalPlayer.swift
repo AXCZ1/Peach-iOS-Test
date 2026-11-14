@@ -81,6 +81,7 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
             media?.addOption(":no-audio")
         }
         if confirmsSeekFrames {
+            media?.addOption(":clock-master=input")
             media?.addOption(":input-fast-seek")
             media?.addOption(":network-caching=300")
         }
@@ -88,7 +89,7 @@ final class VLCOriginalPlayer: LocalOriginalPlayer {
         player.media = media
         self.player = player
         PeachRuntimeLogger.shared.log(
-            "VLC 初始化 decoder=\(decoder == .software ? "software" : "auto") confirmsSeek=\(confirmsSeekFrames) mutedOnly=\(mutedOnly) url=\(url.absoluteString)",
+            "VLC 初始化 decoder=\(decoder == .software ? "software" : "auto") confirmsSeek=\(confirmsSeekFrames) mutedOnly=\(mutedOnly) clockMaster=\(confirmsSeekFrames ? "input" : "auto") url=\(url.absoluteString)",
             level: .info,
             category: "player.vlc",
             source: "VLCOriginalPlayer"
