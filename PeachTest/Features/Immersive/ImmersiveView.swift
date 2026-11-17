@@ -22,6 +22,8 @@ struct ImmersiveView: View {
     @State private var controlsVisible = true
     @StateObject private var orientation = PlaybackOrientation()
     @State private var rotationAnchor: Int?
+    @State private var activePresentation: PlayerPresentation?
+    @State private var seekBarHeight: CGFloat = 0
 
     var body: some View {
         ZStack {
@@ -63,13 +65,13 @@ struct ImmersiveView: View {
         .persistentSystemOverlays(.hidden)
         .task { await load() }
         .onChange(of: currentID) { _, _ in requestRefill() }
-        .onDisappear { refillTask?.cancel(); orientation.restore() }
+        .onDisappear { refillTask?.cancel(); orientation.restore(); activePresentation = nil }
         .environmentObject(orientation)
         .sheet(item: $detailItem) { item in
             NavigationStack {
                 ItemDetailView(item: item, api: api)
                     .navigationDestination(for: EntityRoute.self) { route in
-                        EntityDetailView(api: api, kind: route.kind, name: route.name)
+                        EntityDetailView(api: api, kind: route.kind, name: route.name, selectedTag: route.tag)
                     }
                     .navigationDestination(for: PeachItem.self) { next in
                         ItemDetailView(item: next, api: api)
@@ -91,7 +93,7 @@ struct ImmersiveView: View {
                                           onOpenDetail: { detailItem = item },
                                           onFeedback: { kind, count, mark in feedback(kind, item: item, count: count, mark: mark) },
                                           onAdvance: { advance($0) },
-                                          onRotate: { onError in rotate(from: viewport.size, onError: onError) })
+                                          onPresent: { activePresentation = $0 })
                                 .frame(width: viewport.size.width, height: viewport.size.height)
                                 .clipped()
                                 .id(item.id)
@@ -110,6 +112,16 @@ struct ImmersiveView: View {
                     transaction.disablesAnimations = true
                     withTransaction(transaction) { reader.scrollTo(id, anchor: .top) }
                     rotationAnchor = nil
+                }
+                .onPreferenceChange(ImmersiveSeekBarHeight.self) { seekBarHeight = $0 }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if controlsVisible, detailItem == nil, let session = activePresentation,
+                   session.item.id == currentID {
+                    ImmersiveModeControls(session: session, landscape: orientation.landscape,
+                                          onRotate: { onError in rotate(from: viewport.size, onError: onError) })
+                        .padding(.trailing, insets.trailing + 16)
+                        .padding(.bottom, insets.bottom + 16 + seekBarHeight)
                 }
             }
         }
@@ -285,6 +297,51 @@ struct ImmersiveView: View {
     }
 }
 
+private struct ImmersiveSeekBarHeight: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
+/// Keep mode buttons out of the ScrollView's paging and video gesture hit-testing.
+private struct ImmersiveModeControls: View {
+    @ObservedObject var session: PlayerPresentation
+    let landscape: Bool
+    let onRotate: (@escaping (String) -> Void) -> Void
+    @State private var modeError: String?
+
+    var body: some View {
+        HStack(spacing: 12) {
+            modeButton("pip.enter", "小窗") {
+                session.message = nil
+                session.startPiP()
+            }
+            modeButton(landscape ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
+                       landscape ? "返回竖屏" : "横屏全屏") {
+                session.controller.endBoost()
+                onRotate { modeError = "屏幕切换失败：\($0)" }
+            }
+        }
+        .onChange(of: session.message) { _, message in if let message { modeError = message } }
+        .alert("播放模式切换失败", isPresented: Binding(get: { modeError != nil }, set: { if !$0 { modeError = nil } })) {
+            Button("好", role: .cancel) { modeError = nil }
+        } message: {
+            Text(modeError ?? "")
+        }
+    }
+
+    private func modeButton(_ name: String, _ label: String, action: @escaping () -> Void) -> some View {
+        Button {
+            PeachRuntimeLogger.shared.log("随机连播点击\(label) id=\(session.item.id)",
+                                          level: .info, category: "immersive", source: "ImmersiveModeControls")
+            action()
+        } label: {
+            Image(systemName: name).frame(width: 44, height: 44).foregroundStyle(.white)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).accessibilityLabel(label)
+    }
+}
+
 private struct ImmersivePage: View {
     let api: PeachAPI
     let item: PeachItem
@@ -295,12 +352,11 @@ private struct ImmersivePage: View {
     let onOpenDetail: () -> Void
     let onFeedback: (String, Int, ClimaxMark?) -> Void
     let onAdvance: (Int) -> Void
-    let onRotate: (@escaping (String) -> Void) -> Void
+    let onPresent: (PlayerPresentation) -> Void
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var controller: PlaybackController
     @StateObject private var presentation: PlayerPresentation
     @Environment(\.dismiss) private var dismiss
-    @EnvironmentObject private var orientation: PlaybackOrientation
     @State private var detail: PeachItem?
     @State private var busy = false
     @State private var localCount: Int?
@@ -312,10 +368,10 @@ private struct ImmersivePage: View {
     init(api: PeachAPI, item: PeachItem, isActive: Bool, controlsVisible: Binding<Bool>, insets: EdgeInsets,
          onEnded: @escaping () -> Void, onOpenDetail: @escaping () -> Void,
          onFeedback: @escaping (String, Int, ClimaxMark?) -> Void, onAdvance: @escaping (Int) -> Void,
-         onRotate: @escaping (@escaping (String) -> Void) -> Void) {
+         onPresent: @escaping (PlayerPresentation) -> Void) {
         self.api = api; self.item = item; self.isActive = isActive
         self.insets = insets
-        self.onRotate = onRotate
+        self.onPresent = onPresent
         _controlsVisible = controlsVisible
         self.onEnded = onEnded; self.onOpenDetail = onOpenDetail
         self.onFeedback = onFeedback; self.onAdvance = onAdvance
@@ -338,6 +394,7 @@ private struct ImmersivePage: View {
                 Color.black
                 if controller.hasVideoSurface {
                     SessionVideoSurface(session: presentation)
+                        .allowsHitTesting(false)
                 } else if !isActive {
                     RemoteImage(url: api.coverURL(code: current.coverKey.isEmpty ? current.displayNumber : current.coverKey))
                         .blur(radius: 12).overlay(Color.black.opacity(0.55))
@@ -403,23 +460,20 @@ private struct ImmersivePage: View {
                             }
                         }.padding(.horizontal, 20).padding(.bottom, 12)
                         if isActive {
-                            HStack(spacing: 12) {
-                                Spacer()
-                                modeButton("pip.enter", "小窗") { presentation.startPiP() }
-                                modeButton(orientation.landscape ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
-                                           orientation.landscape ? "返回竖屏" : "横屏全屏") {
-                                    controller.endBoost()
-                                    onRotate { showGesture("屏幕切换失败：\($0)") }
-                                }
-                            }.padding(.horizontal, 16)
+                            // The interactive buttons live outside the paging/gesture layer.
+                            Color.clear.frame(height: 44).allowsHitTesting(false)
                             PlaybackSeekBar(controller: controller, api: api, item: item,
                                             usesLocalSeekThumbnails: true, marks: marks)
+                                .background(GeometryReader { bar in
+                                    Color.clear.preference(key: ImmersiveSeekBarHeight.self, value: bar.size.height)
+                                })
                                 .padding(.horizontal, 20).padding(.bottom, 16)
                         }
                     }
                     .padding(.leading, insets.leading)
                     .padding(.trailing, insets.trailing)
                     .padding(.bottom, insets.bottom)
+                    .zIndex(1)
                 }
             }
         }
@@ -427,6 +481,7 @@ private struct ImmersivePage: View {
             guard playbackActive else { return }
             presentation.appear()
             presentation.onPiPStarted = { dismiss() }
+            onPresent(presentation)
             controller.onEnded = onEnded
             await controller.activate()
         }
@@ -439,15 +494,9 @@ private struct ImmersivePage: View {
             marks = ClimaxMarks.local.list(origin: api.baseURL, item: item)
         }
         .onDisappear { presentation.disappear() }
-        .onChange(of: presentation.message) { _, message in if let message { showGesture(message) } }
         .task(id: item.id) {
             if let fresh = try? await api.item(id: item.id), !Task.isCancelled { detail = fresh }
         }
-    }
-
-    private func modeButton(_ name: String, _ label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) { Image(systemName: name).frame(width: 44, height: 44).foregroundStyle(.white) }
-            .buttonStyle(.plain).accessibilityLabel(label)
     }
 
     private func showGesture(_ message: String) {

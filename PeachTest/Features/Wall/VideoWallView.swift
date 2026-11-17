@@ -100,7 +100,7 @@ struct VideoWallView: View {
         .sheet(item: $detail) { item in
             NavigationStack {
                 ItemDetailView(item: item, api: api)
-                    .navigationDestination(for: EntityRoute.self) { EntityDetailView(api: api, kind: $0.kind, name: $0.name) }
+                    .navigationDestination(for: EntityRoute.self) { EntityDetailView(api: api, kind: $0.kind, name: $0.name, selectedTag: $0.tag) }
                     .navigationDestination(for: PeachItem.self) { ItemDetailView(item: $0, api: api) }
             }.preferredColorScheme(.dark)
         }

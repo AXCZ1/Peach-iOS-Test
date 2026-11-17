@@ -3,6 +3,7 @@ import SwiftUI
 struct ItemDetailView: View {
     let item: PeachItem
     let api: PeachAPI
+    let tagScope: EntityRoute?
     @StateObject private var model: ItemDetailModel
     @State private var playerPresented = false
     @State private var toast: String?
@@ -10,9 +11,10 @@ struct ItemDetailView: View {
     @State private var toastID = UUID()
     @State private var busy = false
 
-    init(item: PeachItem, api: PeachAPI) {
+    init(item: PeachItem, api: PeachAPI, tagScope: EntityRoute? = nil) {
         self.item = item
         self.api = api
+        self.tagScope = tagScope
         _model = StateObject(wrappedValue: ItemDetailModel(api: api, item: item))
     }
 
@@ -168,7 +170,7 @@ struct ItemDetailView: View {
                 section("标签") {
                     FlowLayout(spacing: 7) {
                         ForEach(current.tags, id: \.self) { value in
-                            NavigationLink(value: EntityRoute(kind: "tag", name: value)) {
+                            NavigationLink(value: tagScope?.selectingTag(value) ?? EntityRoute(kind: "tag", name: value)) {
                                 facet(value, icon: nil)
                             }
                             .buttonStyle(.plain)

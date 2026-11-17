@@ -69,7 +69,7 @@ struct LibraryRootView: View {
                     .presentationDragIndicator(.visible)
             }
             .navigationDestination(for: EntityRoute.self) { route in
-                EntityDetailView(api: api, kind: route.kind, name: route.name)
+                EntityDetailView(api: api, kind: route.kind, name: route.name, selectedTag: route.tag)
             }
             .navigationDestination(for: AccountRoute.self) { route in
                 switch route {
@@ -476,11 +476,6 @@ struct LibraryRootView: View {
             history = (try? await api.searchHistory()) ?? history
         }
     }
-}
-
-struct EntityRoute: Hashable {
-    let kind: String
-    let name: String
 }
 
 enum AccountRoute: Hashable {

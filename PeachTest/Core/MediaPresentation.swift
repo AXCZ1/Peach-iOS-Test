@@ -36,6 +36,35 @@ enum EntityKind: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+struct EntityRoute: Hashable {
+    let kind: String
+    let name: String
+    var tag: String? = nil
+
+    var filter: LibraryFilter {
+        var filter = LibraryFilter()
+        switch EntityKind.canonical(kind) {
+        case "performer": filter.performer = name
+        case "studio": filter.studio = name
+        case "tag": filter.tag = name
+        case "series": filter.series = name
+        case "creator": filter.creator = name
+        default: break
+        }
+        if EntityKind.canonical(kind) != "tag" { filter.tag = tag }
+        return filter
+    }
+
+    func selectingTag(_ name: String) -> EntityRoute {
+        switch EntityKind.canonical(kind) {
+        case "performer", "studio", "series", "creator":
+            return EntityRoute(kind: kind, name: self.name, tag: name)
+        default:
+            return EntityRoute(kind: "tag", name: name)
+        }
+    }
+}
+
 enum PlaybackTap: Equatable {
     case backward, toggle, forward
     static func action(at fraction: Double) -> Self {

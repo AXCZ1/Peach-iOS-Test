@@ -135,12 +135,17 @@ struct EntityDetailView: View {
     let api: PeachAPI
     let kind: String
     let name: String
+    var selectedTag: String? = nil
     @State private var entity: PeachEntity?
     @State private var items: [PeachItem] = []
     @State private var error: String?
     @State private var loading = true
     @State private var favorite = false
     @State private var favoriteBusy = false
+    @State private var filteredCount = 0
+
+    private var route: EntityRoute { EntityRoute(kind: kind, name: name, tag: selectedTag) }
+    private var title: String { selectedTag.map { "\(name) · \($0)" } ?? name }
 
     var body: some View {
         ScrollView {
@@ -155,10 +160,10 @@ struct EntityDetailView: View {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 7) {
                                 ForEach(entity.tags) { tag in
-                                    NavigationLink(value: EntityRoute(kind: "tag", name: tag.key)) {
+                                    NavigationLink(value: route.selectingTag(tag.key)) {
                                         Text("\(tag.key) \(tag.count)")
                                             .font(.caption.weight(.medium))
-                                            .foregroundStyle(.white.opacity(0.7))
+                                            .foregroundStyle(selectedTag == tag.key ? PeachTheme.coral : .white.opacity(0.7))
                                             .padding(.horizontal, 10).frame(height: 28)
                                             .background(PeachTheme.surface, in: Capsule())
                                     }
@@ -169,7 +174,9 @@ struct EntityDetailView: View {
                     }
                     LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 18) {
                         ForEach(items) { item in
-                            NavigationLink(value: item) {
+                            NavigationLink {
+                                ItemDetailView(item: item, api: api, tagScope: route)
+                            } label: {
                                 PeachCard(item: item, api: api)
                             }
                             .buttonStyle(.plain)
@@ -182,7 +189,7 @@ struct EntityDetailView: View {
         }
         .background(PeachTheme.background.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
-        .navigationTitle(name)
+        .navigationTitle(title)
         .toolbarBackground(PeachTheme.background, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
         .task {
@@ -203,8 +210,8 @@ struct EntityDetailView: View {
             }
             .frame(width: 72, height: 72)
             VStack(alignment: .leading, spacing: 4) {
-                Text(name).font(.title3.weight(.semibold)).foregroundStyle(.white)
-                Text("\(entity?.assetCount ?? items.count) 部作品")
+                Text(title).font(.title3.weight(.semibold)).foregroundStyle(.white)
+                Text("\(selectedTag == nil ? (entity?.assetCount ?? items.count) : filteredCount) 部作品")
                     .font(.caption).foregroundStyle(.white.opacity(0.42))
                 if let aliases = entity?.aliases, !aliases.isEmpty {
                     Text(aliases.prefix(2).joined(separator: " · "))
@@ -250,21 +257,13 @@ struct EntityDetailView: View {
         loading = true
         error = nil
         do {
-            var filter = LibraryFilter()
-            switch EntityKind.canonical(kind) {
-            case "performer": filter.performer = name
-            case "studio": filter.studio = name
-            case "tag": filter.tag = name
-            case "series": filter.series = name
-            case "creator": filter.creator = name
-            default: break
-            }
             let loaded = try await api.entity(kind: kind, name: name)
-            let loadedItems = try await api.items(filter, offset: 0, limit: 60).items
+            let page = try await api.items(route.filter, offset: 0, limit: 60)
             let shortcuts = try? await api.libraryShortcuts()
             guard !Task.isCancelled else { return }
             entity = loaded
-            items = loadedItems
+            items = page.items
+            filteredCount = page.total ?? page.items.count
             favorite = shortcuts?.favorites.contains { $0.entityID == loaded.id } ?? false
         } catch let failure {
             guard !Task.isCancelled else { return }

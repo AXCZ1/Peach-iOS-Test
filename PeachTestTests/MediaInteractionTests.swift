@@ -31,6 +31,40 @@ final class MediaInteractionTests: XCTestCase {
         XCTAssertEqual(PlaybackTap.action(at: 1), .forward)
     }
 
+    func testIndexTagsKeepEachEntityScope() {
+        for kind in [EntityKind.performer, .studio, .series, .creator] {
+            // Both index API names and detail names must preserve their scope.
+            for routeKind in [kind.rawValue, kind.apiKind] {
+                let base = EntityRoute(kind: routeKind, name: "索引对象")
+                let selected = base.selectingTag("标签甲")
+                let filter = selected.filter
+                XCTAssertEqual(filter.tag, "标签甲")
+                XCTAssertEqual(filter.performer, kind == .performer ? base.name : nil)
+                XCTAssertEqual(filter.studio, kind == .studio ? base.name : nil)
+                XCTAssertEqual(filter.series, kind == .series ? base.name : nil)
+                XCTAssertEqual(filter.creator, kind == .creator ? base.name : nil)
+                XCTAssertNil(base.filter.tag)
+
+                // Entering a work and choosing another tag uses this same route.
+                let next = selected.selectingTag("标签乙")
+                XCTAssertEqual(next.kind, base.kind)
+                XCTAssertEqual(next.name, base.name)
+                XCTAssertEqual(next.filter.tag, "标签乙")
+                XCTAssertNotEqual(next, selected)
+            }
+        }
+    }
+
+    func testStandaloneTagsDoNotInheritAnUnrelatedEntityScope() {
+        let route = EntityRoute(kind: "tags", name: "标签甲").selectingTag("标签乙")
+        XCTAssertEqual(route, EntityRoute(kind: "tag", name: "标签乙"))
+        XCTAssertEqual(route.filter.tag, "标签乙")
+        XCTAssertNil(route.filter.performer)
+        XCTAssertNil(route.filter.studio)
+        XCTAssertNil(route.filter.series)
+        XCTAssertNil(route.filter.creator)
+    }
+
     func testSideTapsExtendTheDeadlineFromTheLatestSkip() {
         var sequence = PlaybackTapSequence()
         XCTAssertEqual(sequence.register(.forward, at: 10), .wait(until: 10.3, showPreviousSingle: false))

@@ -135,7 +135,7 @@ struct StatsView: View {
             NavigationStack {
                 ItemDetailView(item: item, api: api)
                     .navigationDestination(for: EntityRoute.self) { route in
-                        EntityDetailView(api: api, kind: route.kind, name: route.name)
+                        EntityDetailView(api: api, kind: route.kind, name: route.name, selectedTag: route.tag)
                     }
                     .navigationDestination(for: PeachItem.self) { next in
                         ItemDetailView(item: next, api: api)
