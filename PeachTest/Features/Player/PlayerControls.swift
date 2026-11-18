@@ -53,7 +53,7 @@ struct PlayerControls: View {
         }
         .task(id: activity) {
             guard let activity else { return }
-            do { try await Task.sleep(for: .seconds(2)) }
+            do { try await Task.sleep(for: .seconds(5)) }
             catch { return }
             guard !Task.isCancelled, visibility.activity == activity, !interacting else { return }
             withAnimation(.easeInOut(duration: 0.18)) { visibility.visible = false }

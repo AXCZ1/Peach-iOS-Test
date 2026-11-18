@@ -135,7 +135,7 @@ struct EntityDetailView: View {
     let api: PeachAPI
     let kind: String
     let name: String
-    var selectedTag: String? = nil
+    @State private var selectedTag: String?
     @State private var entity: PeachEntity?
     @State private var items: [PeachItem] = []
     @State private var error: String?
@@ -144,34 +144,41 @@ struct EntityDetailView: View {
     @State private var favoriteBusy = false
     @State private var filteredCount = 0
 
+    init(api: PeachAPI, kind: String, name: String, selectedTag: String? = nil) {
+        self.api = api
+        self.kind = kind
+        self.name = name
+        _selectedTag = State(initialValue: selectedTag)
+    }
+
+    private var filtersInPlace: Bool { EntityKind.canonical(kind) == "performer" }
     private var route: EntityRoute { EntityRoute(kind: kind, name: name, tag: selectedTag) }
-    private var title: String { selectedTag.map { "\(name) · \($0)" } ?? name }
+    private var title: String {
+        guard !filtersInPlace, let selectedTag else { return name }
+        return "\(name) · \(selectedTag)"
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 header
+                if let entity, !entity.tags.isEmpty, filtersInPlace || (!loading && error == nil) {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 7) {
+                            ForEach(entity.tags) { tag in
+                                tagChip(tag)
+                            }
+                        }
+                    }
+                }
                 if loading {
                     ProgressView().tint(PeachTheme.coral).frame(maxWidth: .infinity).padding(.top, 40)
                 } else if let error {
                     Text(error).font(.footnote).foregroundStyle(PeachTheme.coral)
+                } else if filtersInPlace, selectedTag != nil, items.isEmpty {
+                    Text("没有符合此标签的作品")
+                        .font(.footnote).foregroundStyle(.white.opacity(0.6))
                 } else {
-                    if let entity, !entity.tags.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 7) {
-                                ForEach(entity.tags) { tag in
-                                    NavigationLink(value: route.selectingTag(tag.key)) {
-                                        Text("\(tag.key) \(tag.count)")
-                                            .font(.caption.weight(.medium))
-                                            .foregroundStyle(selectedTag == tag.key ? PeachTheme.coral : .white.opacity(0.7))
-                                            .padding(.horizontal, 10).frame(height: 28)
-                                            .background(PeachTheme.surface, in: Capsule())
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                        }
-                    }
                     LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 18) {
                         ForEach(items) { item in
                             NavigationLink {
@@ -192,8 +199,38 @@ struct EntityDetailView: View {
         .navigationTitle(title)
         .toolbarBackground(PeachTheme.background, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
-        .task {
+        .task(id: selectedTag) {
             if loading || error != nil { await load() }
+        }
+    }
+
+    @ViewBuilder
+    private func tagChip(_ tag: PeachFacet) -> some View {
+        let selected = selectedTag == tag.key
+        if filtersInPlace {
+            Button {
+                loading = true
+                error = nil
+                selectedTag = selectedTag == tag.key ? nil : tag.key
+            } label: {
+                Text("\(tag.key) \(tag.count)")
+                    .font(.footnote.weight(selected ? .semibold : .regular))
+                    .foregroundStyle(selected ? .black : .white.opacity(0.7))
+                    .padding(.horizontal, 13).frame(height: 30)
+                    .background(selected ? PeachTheme.coral : PeachTheme.surface, in: Capsule())
+                    .overlay(Capsule().stroke(selected ? Color.clear : PeachTheme.line))
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(selected ? .isSelected : [])
+        } else {
+            NavigationLink(value: route.selectingTag(tag.key)) {
+                Text("\(tag.key) \(tag.count)")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(selected ? PeachTheme.coral : .white.opacity(0.7))
+                    .padding(.horizontal, 10).frame(height: 28)
+                    .background(PeachTheme.surface, in: Capsule())
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -211,8 +248,10 @@ struct EntityDetailView: View {
             .frame(width: 72, height: 72)
             VStack(alignment: .leading, spacing: 4) {
                 Text(title).font(.title3.weight(.semibold)).foregroundStyle(.white)
-                Text("\(selectedTag == nil ? (entity?.assetCount ?? items.count) : filteredCount) 部作品")
-                    .font(.caption).foregroundStyle(.white.opacity(0.42))
+                if !filtersInPlace || selectedTag == nil || (!loading && error == nil) {
+                    Text("\(selectedTag == nil ? (entity?.assetCount ?? items.count) : filteredCount) 部作品")
+                        .font(.caption).foregroundStyle(.white.opacity(0.42))
+                }
                 if let aliases = entity?.aliases, !aliases.isEmpty {
                     Text(aliases.prefix(2).joined(separator: " · "))
                         .font(.caption2).foregroundStyle(.white.opacity(0.3)).lineLimit(1)
@@ -254,19 +293,26 @@ struct EntityDetailView: View {
     }
 
     private func load() async {
+        let requestedRoute = route
         loading = true
         error = nil
         do {
-            let loaded = try await api.entity(kind: kind, name: name)
-            let page = try await api.items(route.filter, offset: 0, limit: 60)
-            let shortcuts = try? await api.libraryShortcuts()
-            guard !Task.isCancelled else { return }
-            entity = loaded
+            let page: PeachPage
+            if !filtersInPlace || entity == nil {
+                let loaded = try await api.entity(kind: kind, name: name)
+                page = try await api.items(requestedRoute.filter, offset: 0, limit: 60)
+                let shortcuts = try? await api.libraryShortcuts()
+                guard !Task.isCancelled, route == requestedRoute else { return }
+                entity = loaded
+                favorite = shortcuts?.favorites.contains { $0.entityID == loaded.id } ?? false
+            } else {
+                page = try await api.items(requestedRoute.filter, offset: 0, limit: 60)
+                guard !Task.isCancelled, route == requestedRoute else { return }
+            }
             items = page.items
             filteredCount = page.total ?? page.items.count
-            favorite = shortcuts?.favorites.contains { $0.entityID == loaded.id } ?? false
         } catch let failure {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, route == requestedRoute else { return }
             error = failure.localizedDescription
             PeachRuntimeLogger.shared.log(
                 "实体详情加载失败 kind=\(kind) name=\(name): \(failure.localizedDescription)",
