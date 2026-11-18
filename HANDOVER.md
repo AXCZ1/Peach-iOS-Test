@@ -2,7 +2,9 @@
 
 更新日期：2026-11-18。用户确认的**当前稳定构建**为独立 Peach App **构建 56**（提交 `24cddcc`，Codemagic `6af86196cd5a07c6844f96b0`），已完成 4K MKV/退出回收修复（构建 50–51）、全模块运行日志采集与软路由接收清理链路（构建 52）、大图模式 1 秒静音且 ≥65% 封面续播预览，以及普通 VLC 播放器 `:clock-master=input` 即时切速与 `VLCAVSampleAudioSyncBridge` 2×/1× 音频时钟补偿修复（构建 53–56）。云端 ARM64 Release 编译与 IPA 校验通过，用户已确认将构建 56 作为当前稳定构建。
 
-当前测试构建 **58**：源码 `6bdd545c220bbfd4a3db3b259743c1384676f394`，Codemagic `6afd17c1fe4193daf65b7c28`。普通播放与随机连播共用全屏控制栏，闲置 2 秒自动隐藏。构建 56 继续作为已确认稳定基线。
+当前测试构建 **59**：源码 `ab035117d4bfd9a8864eb49c86ac12579d1fa013`，Codemagic `6afd72549208be42e50f1676`。演员页标签改为原地筛选，全屏控制栏闲置时间改为 5 秒。构建 56 继续作为已确认稳定基线。
+
+测试构建 **58**：源码 `6bdd545c220bbfd4a3db3b259743c1384676f394`，Codemagic `6afd17c1fe4193daf65b7c28`。普通播放与随机连播共用全屏控制栏，该构建的闲置时间为 2 秒。
 
 上一测试构建 **57**：源码 `163486bd01cb2507515205ba73320a24c5188070`，Codemagic `6afcb15d770f833789fc7183`。修复索引实体的标签筛选范围，以及随机连播全屏/小窗按钮点击无响应。
 
@@ -12,7 +14,8 @@
 - **构建 56（当前稳定构建）**：源码 `24cddcc351a55acba5128a5d7c8bc5b6d1f4031c`（含功能提交 `0e2639bdf321df5978e54a98fa77868ded8a3f1d` 与语法修正 `24cddcc`），Codemagic `6af86196cd5a07c6844f96b0`（恢复共享 `VLCMediaPlayer()` + `:clock-master=input`，并新增 `VLCAVSampleAudioSyncBridge` 修复 `2×`/`1×` 音频缓冲估算漂移与冲刷）。历史对照构建：构建 55 `0e2639bdf321df5978e54a98fa77868ded8a3f1d`（Codemagic `6af85fb731cbfae02df82f78`，编译语法报错无 IPA）、构建 54 `0ed00fda029d58d22039fa7f8404339ca855353f`（Codemagic `6af852b6367f76daa2828825`，`--no-audio-time-stretch` 实验已撤回）、构建 53 `7de427ca571c27a546a191d14f5e91c2e5dbdbe6`（Codemagic `6af8492e3b2dc91b3891b175`，首次验证 `:clock-master=input` 消除画面切速延迟，但 `2×` 有静音重采样日志警告）、构建 52 `a30021737e0ffc6b0c45f2266fe6296112b7b188`（Codemagic `6af78987638832d0f45cf595`）、构建 51 `e4c16342be9b03be52b37e629fb6fc196ffb2d2f`（Codemagic `6af7800ee1236d9c61f441e2`）、构建 50 `438edb1c25af153e056c7b02937cb9a1d4ec4a36`（Codemagic `6af757c4f73ae9651430f55b`）、构建 49 `2a08092c837a5588cee8d424358a0bdd6867101c`（Codemagic `6af4cb0a3e65a1d3c042a5cb`）、构建 47 `695566398022edf9b83750295c70f783c7daea10`（Codemagic `6af4b41920423984be1c929b`）、旧基线构建 46 `29d7740651ced31f3cdbd45f63221540d6d3ca30`、VLC 对照构建 34 `f03f909b6cd2f35593c9c76834f63ebf7bf918db`。
 - **已确认稳定 IPA**：`C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.56.ipa`（`21,300,618` 字节，SHA256 `37f360f0507f8bbbb21e22224b4d497dc3be23de651865999e1c9ee7926be63b`；Downloads 中原有 `NAS-unsigned .56.ipa` 来自旧工程，`2,834,870` 字节，SHA256 `4b9446d9be6c1a1dfbae5c4b9d86a6506e7cf07e45c918b7b748f7cdf9280bc0`，未覆盖）。历史 IPA 保留：`Peach-iOS-Test-unsigned.54.ipa`（`21,288,290` 字节，SHA256 `a20e14095f2104ccab75a558914393dbc1ea4dfd1dee68b60a6d9dae607e6068`）、`Peach-iOS-Test-unsigned.53.ipa`（`21,287,900` 字节，SHA256 `396e0d94db52cd0132031dff731b9c683976af707250171b58c7ad4f1de4a618`）、`Peach-iOS-Test-unsigned.52.ipa`（`21,288,115` 字节，SHA256 `facc632509a67ab1a5adee97111cd5377eebb0a4a3e325a1d34c584bebe490f2`）、`NAS-unsigned .51.ipa`（`21,137,763` 字节，SHA256 `74c56b4757217c15d786ba1e3680357073f3096eb87b4e5be819af69b6b36bb`）及构建 50/49/47/46 IPA。
 - Bundle ID `com.axcz1.peachios.test`，显示名 `Peach Test`，iOS 17.0+，iPhone ARM64，无签名；安装仍用用户现有签名方式。
-- **最新测试 IPA（构建 58，待真机）**：`C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.58.ipa`，`21,333,589` 字节，SHA256 `22c56c762afc8db4e61c15d379f6cf3c69e049ad182a32759df93dde8b751e23`。云端产物、构建日志与本机校验位于 `artifacts/codemagic-58/`。已有的 `NAS-unsigned .58.ipa` 属于其他工程。
+- **最新测试 IPA（构建 59，待真机）**：`C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.59.ipa`，`21,341,657` 字节，SHA256 `45eaab3396c9398b9346afb61107645dbcdf9d7dbe9bf56b170b357f5b262704`。构建日志和校验位于 `artifacts/codemagic-59/`。已有的 `NAS-unsigned .59.ipa` 属于其他工程，已核对其 SHA256 未变。
+- **历史测试 IPA（构建 58）**：`C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.58.ipa`，`21,333,589` 字节，SHA256 `22c56c762afc8db4e61c15d379f6cf3c69e049ad182a32759df93dde8b751e23`。云端产物、构建日志与本机校验位于 `artifacts/codemagic-58/`。已有的 `NAS-unsigned .58.ipa` 属于其他工程。
 - **历史测试 IPA（构建 57）**：`C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.57.ipa`，`21,315,996` 字节，SHA256 `8c61372b140119dfaef29e8817feadd839eed6c4e183b4bb6ab3d04e911db825`。同名编号的 `NAS-unsigned .57.ipa` 属于其他工程（`2,835,484` 字节，SHA256 `e01344b46e44eefd56960c6b18b57bf1010725651ca5d810e09bca948c26cba4`），未覆盖。云端产物、构建日志与本机校验位于 `artifacts/codemagic-57/`。
 - `codemagic.yaml` 的 `ios-unsigned-ipa` 调用 `scripts/build-unsigned-ipa.sh`；Pod 安装后使用 `PeachTest.xcworkspace` / `PeachTest` scheme。Codemagic 应用 ID `6aed85f0165a22c4d4b043a0`。API 凭据由进程环境提供，不写入仓库。
 - 后端为用户自管 Peach `0.52.0`；App 支持局域网地址和 HTTPS 域名，登录态及密码保存在设备。软路由侧（`root@192.168.5.5`，目录 `/mnt/ssd/apps/peach`）通过 `compose.yaml` 在原有 `192.168.5.5:8900` 端口前新增轻量网关与日志接收容器：`peach-edge`（Nginx `/mnt/ssd/apps/peach/ios-logging/nginx.conf`）将 `POST /api/ios-logs` 反代到 `peach-log-receiver:8901`（`/mnt/ssd/apps/peach/ios-logging/receiver.py`），其余请求透传 `peach:8900`（不新增公网端口，Peach 主服务未修改）；日志按 JSON Lines 追加到 `/mnt/ssd/apps/peach/ios-playback.jsonl`，由容器内 30 秒后台线程及宿主机 `*/5 * * * *` cron（`# peach-ios-log-prune`）按日志时间戳清理超过 1 小时记录。
@@ -20,6 +23,7 @@
 
 ## 当前功能状态
 
+- **演员标签与全屏计时（构建 59，源码 `ab03511`）**。`EntityBrowseView.swift` 在演员页内切换标签并刷新作品列表，重复点当前标签清除筛选。查询保持演员范围，过时请求不能写回结果。`PlayerControls.swift` 将全屏闲置时间设为 5 秒，沿用拖动时暂停计时、松手重计的规则。Windows Release 核心测试 57 项、4 项跳过、0 项失败。Codemagic 核心测试、iPhone ARM64 Release 编译、IPA 结构和 SHA256 校验通过。演员页交互和实际计时待 iPhone 真机验证。
 - **全屏控制栏（构建 58，源码 `6bdd545`）**：`PlayerControls.swift` 提供共享布局及 2 秒闲置计时。`PlayerView.swift` 与 `ImmersiveView.swift` 在横屏接入共享视图并复用各自的播放会话，竖屏显示常驻控制栏。`MediaArtwork.swift` 的进度条在拖动开始和松手时通知计时器，横滑画面使用相同规则，双击走各自原有快进逻辑。播放墙保持既有控制栏策略和手势。Windows Release 核心测试 57 项、4 项跳过、0 项失败，Codemagic Debug/Release 核心测试、iPhone ARM64 Release 编译、IPA 结构及 SHA256 校验通过。源代码备份 `backups/fullscreen-controls-20261118-110457/source.zip`。
 - **索引与随机连播修复（构建 57，源码 `163486b`）**：
   - `MediaPresentation.swift` 的 `EntityRoute` 携带实体与可选标签，`EntityBrowseView.swift` 查询实体和标签的交集；从实体页进入作品后，`ItemDetailView.swift` 的标签仍保留该实体范围。`LibraryRootView.swift`、`AccountHubView.swift`、`VideoWallView.swift`、`ImmersiveView.swift` 的详情路由转交标签条件，播放墙内嵌播放器未改。
@@ -77,7 +81,7 @@
 
 ## 下一步任务
 
-优先实测构建 58：普通播放和随机连播横屏时比较布局，分别拖进度条和画面超过 2 秒，确认松手后才重新计时。检查单击唤出、双击快进、横竖屏切换、随机连播分页和小窗，以及竖屏常驻和播放墙行为。当前只有编译及核心测试结果，未进行真机交互验证。
+优先实测构建 59。索引进入演员页，选标签、切换标签和再次点击取消时都留在同一页，作品始终属于当前演员。普通播放和随机连播横屏时比较布局，拖进度条和画面超过 5 秒，确认松手后重新计满 5 秒。检查单击唤出、双击快进、横竖屏切换、随机连播分页和小窗，以及竖屏常驻和播放墙行为。当前只有编译及核心测试结果，真机交互未验证。
 
 0. 安装 **Peach 构建 57** 真机验证：演员/厂牌/系列/创作者页选标签，仅显示该实体和标签的交集；由这些页打开作品后点击标签仍保留实体范围，全局标签入口仍查全馆藏。随机连播分别测试 AVPlayer/VLC 的全屏、小窗按钮，切页后按钮应控制当前作品，横竖屏切换保留位置，小窗开始后退出连播但继续播放；回归原有上下翻页、横滑/进度条、双击、长按、记一次高潮、详情返回与播放墙。按钮入口日志为 `ImmersiveModeControls`，共享横屏日志为 `PlaybackOrientation`，小窗回调为 `PlayerPresentation`。尚未收到构建 57 真机回执，稳定基线仍为 56。
 1. 日常真机回归与后续迭代均以稳定版本 **构建 56**（`C:/Users/mo/Downloads/Peach-iOS-Test-unsigned.56.ipa`，提交 `24cddcc`；切勿误用旧 `NAS-unsigned .56.ipa`）为基准；必要时可结合 `/mnt/ssd/apps/peach/ios-playback.jsonl` 或本地 `artifacts/ios-playback.jsonl` 核对 `Audio sync compensated` / `Audio sync restored 1.0x` 与音频告警计数。
