@@ -143,6 +143,7 @@ struct PlaybackSeekBar: View {
     var usesLocalSeekThumbnails = false
     var marks: [ClimaxMark] = []
     var pausesPlaybackWhileDragging = true
+    var onInteraction: (() -> Void)? = nil
     @State private var dragging = false
     @State private var value = 0.0
 
@@ -203,6 +204,7 @@ struct PlaybackSeekBar: View {
                     if !dragging {
                         dragging = true
                         controller.beginScrubbing(pausesPlayback: pausesPlaybackWhileDragging)
+                        onInteraction?()
                     }
                     value = controller.duration * min(1, max(0, gesture.location.x / max(1, geometry.size.width)))
                 }
@@ -215,17 +217,22 @@ struct PlaybackSeekBar: View {
                         ? tappedMark(x: point.x, width: geometry.size.width) : nil
                     controller.endScrubbing(at: mark?.seconds ?? value)
                     dragging = false
+                    onInteraction?()
                 })
             .accessibilityElement()
             .accessibilityLabel("播放进度")
             .accessibilityValue("\(MediaClock.text(shownTime))，共 \(MediaClock.text(controller.duration))")
             .accessibilityAdjustableAction { direction in
                 controller.skip(by: direction == .increment ? 10 : -10)
+                onInteraction?()
             }
 
             .accessibilityActions {
                 ForEach(marks.filter { $0.seconds <= controller.duration }) { mark in
-                    Button("跳到记录点 \(MediaClock.text(mark.seconds))") { controller.seek(to: mark.seconds) }
+                    Button("跳到记录点 \(MediaClock.text(mark.seconds))") {
+                        controller.seek(to: mark.seconds)
+                        onInteraction?()
+                    }
                 }
             }
 

@@ -19,11 +19,15 @@ struct ImmersiveView: View {
     @State private var undoAction: SingleUseAction?
     @State private var toastID = UUID()
     @State private var detailItem: PeachItem?
-    @State private var controlsVisible = true
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @State private var controls = PlayerControlsVisibility()
+    @State private var fullscreenFeedbackBusy = false
     @StateObject private var orientation = PlaybackOrientation()
     @State private var rotationAnchor: Int?
     @State private var activePresentation: PlayerPresentation?
     @State private var seekBarHeight: CGFloat = 0
+
+    private var fullscreen: Bool { verticalSizeClass == .compact }
 
     var body: some View {
         ZStack {
@@ -40,7 +44,18 @@ struct ImmersiveView: View {
                     pager(insets: safeArea.safeAreaInsets).ignoresSafeArea()
                 }
             }
-            if controlsVisible { closeButton }
+            if !fullscreen {
+                closeButton
+            } else if detailItem == nil, let session = activePresentation, session.item.id == currentID {
+                PlayerControls(session: session, model: session.controller, orientation: orientation, visibility: $controls,
+                               fullscreen: true, pausesFullscreenPlaybackWhileDragging: true,
+                               marks: ClimaxMarks.local.list(origin: api.baseURL, item: session.item),
+                               feedbackBusy: fullscreenFeedbackBusy, onClose: { dismiss() },
+                               onRecord: { recordFullscreenClimax(session) },
+                               onRotate: { rotate { showToast("屏幕切换失败：\($0)") } },
+                               onPiP: { session.message = nil; session.startPiP() })
+                    .onChange(of: session.message) { _, message in if let message { showToast(message) } }
+            }
             if let toast {
                 ToastBar(message: toast, undo: undoAction)
                     .padding(.horizontal, 20).padding(.top, 68)
@@ -64,7 +79,9 @@ struct ImmersiveView: View {
         .statusBarHidden()
         .persistentSystemOverlays(.hidden)
         .task { await load() }
-        .onChange(of: currentID) { _, _ in requestRefill() }
+        .onChange(of: currentID) { _, _ in controls.show(); requestRefill() }
+        .onChange(of: fullscreen) { _, _ in controls.show() }
+        .onChange(of: detailItem?.id) { _, _ in controls.show() }
         .onDisappear { refillTask?.cancel(); orientation.restore(); activePresentation = nil }
         .environmentObject(orientation)
         .sheet(item: $detailItem) { item in
@@ -88,7 +105,7 @@ struct ImmersiveView: View {
                         ForEach(items) { item in
                             ImmersivePage(api: api, item: item,
                                           isActive: currentID == item.id && detailItem == nil,
-                                          controlsVisible: $controlsVisible, insets: insets,
+                                          controls: $controls, fullscreen: fullscreen, insets: insets,
                                           onEnded: { if currentID == item.id { advance(1) } },
                                           onOpenDetail: { detailItem = item },
                                           onFeedback: { kind, count, mark in feedback(kind, item: item, count: count, mark: mark) },
@@ -116,10 +133,10 @@ struct ImmersiveView: View {
                 .onPreferenceChange(ImmersiveSeekBarHeight.self) { seekBarHeight = $0 }
             }
             .overlay(alignment: .bottomTrailing) {
-                if controlsVisible, detailItem == nil, let session = activePresentation,
+                if !fullscreen, detailItem == nil, let session = activePresentation,
                    session.item.id == currentID {
                     ImmersiveModeControls(session: session, landscape: orientation.landscape,
-                                          onRotate: { onError in rotate(from: viewport.size, onError: onError) })
+                                          onRotate: { onError in rotate(onError: onError) })
                         .padding(.trailing, insets.trailing + 16)
                         .padding(.bottom, insets.bottom + 16 + seekBarHeight)
                 }
@@ -127,12 +144,28 @@ struct ImmersiveView: View {
         }
     }
 
-    private func rotate(from size: CGSize, onError: @escaping (String) -> Void) {
+    private func rotate(onError: @escaping (String) -> Void) {
+        activePresentation?.controller.endBoost()
         let targetLandscape = !orientation.landscape
-        if targetLandscape != (size.width > size.height) { rotationAnchor = currentID }
+        if targetLandscape != fullscreen { rotationAnchor = currentID }
         orientation.toggle { message in
             rotationAnchor = nil
             onError(message)
+        }
+    }
+
+    private func recordFullscreenClimax(_ session: PlayerPresentation) {
+        guard !fullscreenFeedbackBusy else { return }
+        let position = session.controller.climaxPosition
+        fullscreenFeedbackBusy = true
+        Task {
+            defer { fullscreenFeedbackBusy = false }
+            do {
+                let (count, mark) = try await ClimaxMarks.local.record(api: api, item: session.item, at: position)
+                feedback("o", item: session.item, count: count, mark: mark)
+            } catch {
+                showToast("写入失败：\(error.localizedDescription)")
+            }
         }
     }
 
@@ -346,7 +379,8 @@ private struct ImmersivePage: View {
     let api: PeachAPI
     let item: PeachItem
     let isActive: Bool
-    @Binding var controlsVisible: Bool
+    @Binding var controls: PlayerControlsVisibility
+    let fullscreen: Bool
     let insets: EdgeInsets
     let onEnded: () -> Void
     let onOpenDetail: () -> Void
@@ -365,14 +399,16 @@ private struct ImmersivePage: View {
     @State private var gestureFeedback: String?
     @State private var feedbackID = UUID()
 
-    init(api: PeachAPI, item: PeachItem, isActive: Bool, controlsVisible: Binding<Bool>, insets: EdgeInsets,
+    init(api: PeachAPI, item: PeachItem, isActive: Bool,
+         controls: Binding<PlayerControlsVisibility>, fullscreen: Bool, insets: EdgeInsets,
          onEnded: @escaping () -> Void, onOpenDetail: @escaping () -> Void,
          onFeedback: @escaping (String, Int, ClimaxMark?) -> Void, onAdvance: @escaping (Int) -> Void,
          onPresent: @escaping (PlayerPresentation) -> Void) {
         self.api = api; self.item = item; self.isActive = isActive
         self.insets = insets
         self.onPresent = onPresent
-        _controlsVisible = controlsVisible
+        _controls = controls
+        self.fullscreen = fullscreen
         self.onEnded = onEnded; self.onOpenDetail = onOpenDetail
         self.onFeedback = onFeedback; self.onAdvance = onAdvance
         let controller = PlaybackController(api: api, item: item)
@@ -401,16 +437,33 @@ private struct ImmersivePage: View {
                 }
                 if playbackActive {
                     MediaGestureOverlay(
-                        onTap: { controlsVisible.toggle() },
-                        onDoubleTap: { showGesture(controller.doubleTap(at: Double($0))) },
+                        onTap: {
+                            guard fullscreen, !controller.isScrubbing else { return }
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                controls.visible.toggle()
+                                controls.noteActivity()
+                            }
+                        },
+                        onDoubleTap: {
+                            if fullscreen { controls.noteActivity() }
+                            showGesture(controller.doubleTap(at: Double($0)))
+                        },
                         onSeekChanged: { dx in
                             controller.previewSeek(seekOrigin + dx / max(geometry.size.width, 1) * controller.duration)
                         },
                         onSeekEnded: { dx in
                             controller.endScrubbing(at: seekOrigin + dx / max(geometry.size.width, 1) * controller.duration)
+                            if fullscreen { controls.show() }
                         },
-                        onSeekBegan: { seekOrigin = controller.currentTime; controller.beginScrubbing() },
-                        onSeekCancelled: { controller.cancelScrubbing() },
+                        onSeekBegan: {
+                            seekOrigin = controller.currentTime
+                            controller.beginScrubbing()
+                            if fullscreen { controls.show() }
+                        },
+                        onSeekCancelled: {
+                            controller.cancelScrubbing()
+                            if fullscreen { controls.show() }
+                        },
                         onHoldBegan: { controller.beginBoost() }, onHoldEnded: { controller.endBoost() }
                     )
                     .accessibilityElement().accessibilityLabel("视频画面")
@@ -436,7 +489,7 @@ private struct ImmersivePage: View {
                     Text(gestureFeedback).font(.headline).foregroundStyle(.white)
                         .padding(16).background(.black.opacity(0.5), in: Capsule()).allowsHitTesting(false)
                 }
-                if controlsVisible || controller.seekPreview != nil || controller.isScrubbing {
+                if !fullscreen {
                     VStack(spacing: 0) {
                         Spacer()
                         HStack(alignment: .bottom, spacing: 14) {
@@ -486,9 +539,6 @@ private struct ImmersivePage: View {
             await controller.activate()
         }
         .onChange(of: playbackActive) { _, active in controller.setActive(active) }
-        .onChange(of: controller.isPlaying) { _, playing in
-            if playing { controlsVisible = false }
-        }
         .onChange(of: item.oCount, initial: true) { _, count in
             localCount = count
             marks = ClimaxMarks.local.list(origin: api.baseURL, item: item)

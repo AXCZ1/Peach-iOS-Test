@@ -27,7 +27,7 @@ struct PlayerView: View {
     @State private var tapSequence = PlaybackTapSequence()
     @State private var singleTapTask: Task<Void, Never>?
     @State private var skipAnchor = 0.0
-    @State private var controlsVisible = true
+    @State private var controls = PlayerControlsVisibility()
     @State private var screenScrubOrigin: Double?
     @State private var dismissOffset: CGFloat = 0
     @State private var marks: [ClimaxMark] = []
@@ -45,6 +45,8 @@ struct PlayerView: View {
         _session = StateObject(wrappedValue: session)
         _model = StateObject(wrappedValue: session.controller)
     }
+
+    private var fullscreen: Bool { verticalSizeClass == .compact && !preserveOnExit }
 
     var body: some View {
         ZStack {
@@ -75,10 +77,18 @@ struct PlayerView: View {
             if !preserveOnExit, model.phase == .ready {
                 playbackFeedback
             }
-            if controlsVisible || screenScrubOrigin != nil {
-                chrome
-                    .transition(.opacity)
-            }
+            PlayerControls(session: session, model: model, orientation: orientation, visibility: $controls,
+                           fullscreen: fullscreen, preserveOnExit: preserveOnExit,
+                           keepVisibleDuringWallScrub: screenScrubOrigin != nil,
+                           marks: marks, feedbackBusy: feedbackBusy, onClose: closePlayer,
+                           onRecord: {
+                               let position = model.climaxPosition
+                               Task { await recordClimax(at: position) }
+                           }, onRotate: {
+                               model.endBoost()
+                               orientation.toggle { showToast("屏幕切换失败：\($0)") }
+                           }, onPiP: { session.startPiP() })
+                .offset(y: dismissOffset)
         }
         .overlay(alignment: .bottom) {
             if let toast { ToastBar(message: toast, undo: undoAction).padding(20) }
@@ -113,9 +123,10 @@ struct PlayerView: View {
         .onChange(of: model.isScrubbing) { _, scrubbing in
             if scrubbing { resetTapSequence() }
         }
+        .onChange(of: fullscreen) { _, _ in controls.show() }
         .onChange(of: model.isPlaying) { _, playing in
-            guard playing else { return }
-            withAnimation(.easeInOut(duration: 0.2)) { controlsVisible = false }
+            guard preserveOnExit, playing else { return }
+            withAnimation(.easeInOut(duration: 0.2)) { controls.visible = false }
         }
     }
 
@@ -140,6 +151,7 @@ struct PlayerView: View {
                 guard let origin = screenScrubOrigin else { return }
                 screenScrubOrigin = nil
                 model.endScrubbing(at: timeForDrag(dx, origin))
+                if fullscreen { controls.show() }
             },
             allowsHorizontalSeek: session.allowsScreenScrubbing && model.phase == .ready && model.duration > 0,
             onSeekBegan: {
@@ -148,11 +160,13 @@ struct PlayerView: View {
                 screenScrubOrigin = model.currentTime
                 model.beginScrubbing(pausesPlayback: preserveOnExit)
                 model.previewSeek(model.currentTime)
+                if fullscreen { controls.show() }
             },
             onSeekCancelled: {
                 guard screenScrubOrigin != nil else { return }
                 screenScrubOrigin = nil
                 model.cancelScrubbing()
+                if fullscreen { controls.show() }
             },
             onHoldBegan: { resetTapSequence(); model.beginBoost() }, onHoldEnded: { model.endBoost() },
             allowsDownwardDismiss: !preserveOnExit && !orientation.landscape && verticalSizeClass != .compact,
@@ -215,9 +229,11 @@ struct PlayerView: View {
                 toggleControls()
             }
         case .togglePlayback:
+            if fullscreen { controls.noteActivity() }
             model.togglePlayback()
             showPlaybackFeedback(.toggle)
         case .seek(let offset, let startsSequence):
+            if fullscreen { controls.noteActivity() }
             if startsSequence { skipAnchor = model.currentTime }
             // Seek callbacks may still be reporting the old position during rapid taps.
             model.seek(to: skipAnchor + offset)
@@ -233,7 +249,11 @@ struct PlayerView: View {
     }
 
     private func toggleControls() {
-        withAnimation(.easeInOut(duration: 0.18)) { controlsVisible.toggle() }
+        guard fullscreen || preserveOnExit else { return }
+        withAnimation(.easeInOut(duration: 0.18)) {
+            controls.visible.toggle()
+            controls.noteActivity()
+        }
     }
 
     private func showPlaybackFeedback(_ value: PlaybackFeedback) {
@@ -283,89 +303,9 @@ struct PlayerView: View {
         }
     }
 
-    private var chrome: some View {
-        VStack {
-            HStack {
-                Button(action: closePlayer) {
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 42, height: 42)
-                        .background(.black.opacity(0.4), in: Circle())
-                }
-                .accessibilityLabel("关闭播放")
-                Spacer()
-                VStack(spacing: 2) {
-                    Text(item.displayNumber.isEmpty ? "Peach" : item.displayNumber)
-                        .font(.caption.weight(.semibold).monospaced())
-                        .foregroundStyle(.white.opacity(0.8))
-                    if let note = model.formatNote {
-                        Text(note).font(.system(size: 9)).foregroundStyle(.white.opacity(0.38))
-                    }
-                }
-                Spacer()
-                Button { model.setMuted(!model.isMuted) } label: {
-                    Image(systemName: model.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 42, height: 42)
-                        .background(.black.opacity(0.4), in: Circle())
-                }
-                .accessibilityLabel(model.isMuted ? "打开声音" : "静音")
-            }
-            .padding(.horizontal, 18)
-            .padding(.top, 8)
-
-            Spacer()
-
-            Group {
-                if verticalSizeClass == .compact, !preserveOnExit {
-                    HStack(spacing: 8) {
-                        PlaybackSeekBar(controller: model, api: api, item: item, inlineTimes: true,
-                                        usesLocalSeekThumbnails: true, marks: marks, pausesPlaybackWhileDragging: false)
-                        HStack(spacing: 6) { playbackActions }
-                    }.padding(.bottom, 2)
-                } else {
-                    VStack(spacing: 0) {
-                        PlaybackSeekBar(controller: model, api: api, item: item,
-                                        usesLocalSeekThumbnails: !preserveOnExit, marks: preserveOnExit ? [] : marks,
-                                        pausesPlaybackWhileDragging: preserveOnExit)
-                        HStack(spacing: 14) {
-                            Spacer()
-                            playbackActions
-                        }.frame(height: 44)
-                    }.padding(.bottom, 8)
-                }
-            }
-            .padding(.horizontal, 20)
-            .background(LinearGradient(colors: [.clear, .black.opacity(0.8)], startPoint: .top, endPoint: .bottom))
-        }
-        .offset(y: dismissOffset)
-    }
-
     private func closePlayer() {
         if !preserveOnExit { session.close() }
         dismiss()
-    }
-
-    @ViewBuilder private var playbackActions: some View {
-        playerIcon("heart", label: "记一次高潮") {
-            let position = model.climaxPosition
-            Task { await recordClimax(at: position) }
-        }
-            .disabled(feedbackBusy)
-        playerIcon("pip.enter", label: "小窗播放") { session.startPiP() }
-            .opacity(session.canStartPiP ? 1 : 0.45)
-        playerIcon(orientation.landscape ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
-                   label: orientation.landscape ? "返回竖屏" : "横屏全屏") {
-            model.endBoost()
-            orientation.toggle { showToast("屏幕切换失败：\($0)") }
-        }
-    }
-
-    private func playerIcon(_ name: String, label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) { Image(systemName: name).font(.system(size: 18)).frame(width: 44, height: 44).foregroundStyle(.white) }
-            .buttonStyle(.plain).accessibilityLabel(label)
     }
 
     private func recordClimax(at position: Double?) async {
